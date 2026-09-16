@@ -6,12 +6,14 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from vait.rag.models import (
-    RAGContextDocument,
     RAGGeneration,
     RAGGenerationRequest,
 )
-
-_INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+from vait.rag.prompt_contracts import (
+    INSUFFICIENT_EVIDENCE,
+    RAGPromptContract,
+    build_rag_messages,
+)
 
 
 class _LocalCausalModel(Protocol):
@@ -48,6 +50,9 @@ class HuggingFaceCausalGenerator:
         minimum_score: float = 0.4,
         max_new_tokens: int = 80,
         local_files_only: bool = True,
+        prompt_contract: RAGPromptContract = (
+            RAGPromptContract.BASELINE_V1
+        ),
     ) -> None:
         """Load a reproducible causal model and deterministic tokenizer."""
         if not model_id.strip():
@@ -81,6 +86,7 @@ class HuggingFaceCausalGenerator:
         self._minimum_score = minimum_score
         self._max_new_tokens = max_new_tokens
         self._local_files_only = local_files_only
+        self._prompt_contract = prompt_contract
 
         self._tokenizer = AutoTokenizer.from_pretrained(
             model_id,
@@ -109,7 +115,8 @@ class HuggingFaceCausalGenerator:
             f"@{self._revision}:"
             f"device={self._device}:"
             f"minimum-score={self._minimum_score:.6f}:"
-            f"max-new-tokens={self._max_new_tokens}"
+            f"max-new-tokens={self._max_new_tokens}:"
+            f"prompt-contract={self._prompt_contract.value}"
         )
 
     @property
@@ -132,6 +139,11 @@ class HuggingFaceCausalGenerator:
         """Return the retrieval abstention threshold."""
         return self._minimum_score
 
+    @property
+    def prompt_contract(self) -> RAGPromptContract:
+        """Return the versioned generation contract."""
+        return self._prompt_contract
+
     def generate(
         self,
         request: RAGGenerationRequest,
@@ -152,9 +164,10 @@ class HuggingFaceCausalGenerator:
         if strongest_document.score < self._minimum_score:
             return self._abstain()
 
-        messages = _build_messages(
+        messages = build_rag_messages(
             request,
             context_documents=ordered_context,
+            contract=self._prompt_contract,
         )
 
         prompt = self._tokenizer.apply_chat_template(
@@ -206,7 +219,7 @@ class HuggingFaceCausalGenerator:
         if not answer:
             return self._abstain()
 
-        if answer == _INSUFFICIENT_EVIDENCE:
+        if answer == INSUFFICIENT_EVIDENCE:
             return self._abstain()
 
         return RAGGeneration(
@@ -226,44 +239,3 @@ class HuggingFaceCausalGenerator:
             cited_document_ids=(),
             abstained=True,
         )
-
-
-def _build_messages(
-    request: RAGGenerationRequest,
-    *,
-    context_documents: tuple[RAGContextDocument, ...],
-) -> list[dict[str, str]]:
-    """Build a bounded evidence-only chat prompt."""
-    context = "\n\n".join(
-        (
-            f"[{document.document_id}]\n"
-            f"{document.text}"
-        )
-        for document in context_documents
-    )
-
-    system_message = (
-        "Answer the question using only the supplied policy context. "
-        "Do not add facts, reasons, consequences, procedures, or actions "
-        "that are not explicitly stated in the context. "
-        f"If the evidence does not support an answer, respond exactly "
-        f"{_INSUFFICIENT_EVIDENCE}."
-    )
-
-    user_message = (
-        "Policy context:\n"
-        f"{context}\n\n"
-        "Question:\n"
-        f"{request.query}"
-    )
-
-    return [
-        {
-            "role": "system",
-            "content": system_message,
-        },
-        {
-            "role": "user",
-            "content": user_message,
-        },
-    ]

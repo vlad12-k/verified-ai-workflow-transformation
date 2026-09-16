@@ -303,3 +303,30 @@ def test_generator_rejects_invalid_configuration(
             revision="abc123",
             max_new_tokens=0,
         )
+
+
+def test_generator_exposes_versioned_prompt_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prompt contract must be part of reproducible model identity."""
+    from vait.rag.prompt_contracts import RAGPromptContract
+
+    tokenizer = FakeTokenizer()
+    model = FakeModel()
+    patch_model_loading(
+        monkeypatch,
+        tokenizer=tokenizer,
+        model=model,
+    )
+
+    generator = HuggingFaceCausalGenerator(
+        model_id="example/model",
+        revision="abc123",
+        prompt_contract=RAGPromptContract.STRICT_V2,
+    )
+
+    assert generator.prompt_contract is RAGPromptContract.STRICT_V2
+    assert (
+        "prompt-contract=strict-v2"
+        in generator.implementation_id
+    )
