@@ -38,6 +38,10 @@ ml = [
     "xgboost>=2.1,<4.0",
 ]
 
+torch = [
+    "torch>=2.5,<3.0",
+]
+
 [project.scripts]
 vait = "vait.cli:app"
 

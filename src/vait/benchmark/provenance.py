@@ -29,6 +29,7 @@ _TRACKED_PACKAGES = (
     "PyYAML",
     "scikit-learn",
     "xgboost",
+    "torch",
 )
 
 
