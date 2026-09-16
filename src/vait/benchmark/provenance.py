@@ -30,6 +30,10 @@ _TRACKED_PACKAGES = (
     "scikit-learn",
     "xgboost",
     "torch",
+    "sentence-transformers",
+    "transformers",
+    "huggingface-hub",
+    "tokenizers",
 )
 
 

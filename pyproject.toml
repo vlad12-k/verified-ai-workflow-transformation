@@ -42,6 +42,10 @@ torch = [
     "torch>=2.5,<3.0",
 ]
 
+embeddings = [
+    "sentence-transformers>=6.0,<7.0",
+]
+
 [project.scripts]
 vait = "vait.cli:app"
 
@@ -76,5 +80,9 @@ show_missing = true
 skip_covered = false
 
 [[tool.mypy.overrides]]
-module = ["sklearn.*", "xgboost.*"]
+module = [
+    "sklearn.*",
+    "xgboost.*",
+    "sentence_transformers.*",
+]
 ignore_missing_imports = true
