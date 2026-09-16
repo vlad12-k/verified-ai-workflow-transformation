@@ -1,49 +1,47 @@
-"""Evaluate the AP benchmark against its declared quality baseline."""
+"""Evaluate AP benchmark v0.1 against its versioned quality policy."""
+
+from pathlib import Path
 
 from vait.benchmark.loader import load_benchmark
-from vait.benchmark.quality import (
-    BenchmarkQualityPolicy,
-    evaluate_benchmark_quality,
+from vait.benchmark.quality_policy import (
+    evaluate_versioned_benchmark_quality,
+    load_quality_policy,
 )
-from vait.contracts.models import RiskLevel
+from vait.benchmark.reporting import write_benchmark_report
 
 dataset = load_benchmark(
     "datasets/ap_invoice_exceptions/v0.1/cases.yaml"
 )
 
-policy = BenchmarkQualityPolicy(
-    min_total_cases=12,
-    min_cases_per_risk={
-        RiskLevel.LOW: 2,
-        RiskLevel.MEDIUM: 4,
-        RiskLevel.HIGH: 4,
-        RiskLevel.CRITICAL: 2,
-    },
-    required_tags=frozenset(
-        {
-            "adversarial",
-            "boundary",
-            "amount-mismatch",
-            "fraud-indicator",
-            "compliance",
-        }
-    ),
-    min_adversarial_cases=2,
-    min_boundary_cases=2,
+policy_document = load_quality_policy(
+    "datasets/ap_invoice_exceptions/v0.1/quality-policy.yaml"
 )
 
-report = evaluate_benchmark_quality(
+artifact = evaluate_versioned_benchmark_quality(
     dataset=dataset,
-    policy=policy,
+    document=policy_document,
 )
 
-print(f"Benchmark: {report.benchmark_id}")
-print(f"Version: {report.benchmark_version}")
-print(f"Cases: {report.total_cases}")
-print(f"Adversarial cases: {report.adversarial_cases}")
-print(f"Boundary cases: {report.boundary_cases}")
-print(f"Duplicate groups: {len(report.duplicate_case_groups)}")
-print(f"Quality gate: {'PASS' if report.passed else 'FAIL'}")
+report_path = write_benchmark_report(
+    artifact,
+    Path("artifacts/benchmarks/ap-v0.1-quality.json"),
+)
 
-for issue in report.issues:
+quality = artifact.quality
+
+print(f"Benchmark: {artifact.benchmark_id}")
+print(f"Version: {artifact.benchmark_version}")
+print(f"Cases: {quality.total_cases}")
+print(f"Adversarial cases: {quality.adversarial_cases}")
+print(f"Boundary cases: {quality.boundary_cases}")
+print(f"Duplicate groups: {len(quality.duplicate_case_groups)}")
+print(f"Quality gate: {'PASS' if quality.passed else 'FAIL'}")
+print(f"Dataset SHA-256: {artifact.dataset_fingerprint_sha256}")
+print(
+    "Policy SHA-256: "
+    f"{artifact.quality_policy_fingerprint_sha256}"
+)
+print(f"Report: {report_path}")
+
+for issue in quality.issues:
     print(f"- {issue.code.value}: {issue.message}")
