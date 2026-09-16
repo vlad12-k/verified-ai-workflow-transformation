@@ -1,0 +1,24 @@
+benchmark_id: ap-invoice-exceptions
+benchmark_version: "0.2"
+
+policy:
+  min_total_cases: 20
+
+  min_cases_per_risk:
+    low: 3
+    medium: 6
+    high: 7
+    critical: 4
+
+  required_tags:
+    - adversarial
+    - boundary
+    - precision
+    - inconsistent-input
+    - precedence
+    - compliance
+    - fraud-indicator
+
+  min_adversarial_cases: 9
+  min_boundary_cases: 5
+  allow_exact_duplicates: false

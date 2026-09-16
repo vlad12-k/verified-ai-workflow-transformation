@@ -1,0 +1,398 @@
+benchmark_id: ap-invoice-exceptions
+version: "0.2"
+description: >
+  Expanded synthetic benchmark for evaluating bounded invoice-exception
+  decision transformations under nominal, boundary, inconsistent-input,
+  precedence, and adversarial conditions. Gold outcomes are benchmark
+  labels and are independent of any model-provider output.
+
+cases:
+  - case_id: standard-po-match
+    input_data:
+      invoice_amount: 500.00
+      purchase_order_amount: 500.00
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: false
+      bank_details_changed: false
+      tax_id_valid: true
+    gold_outcome:
+      decision: RECOMMEND_APPROVE
+    risk_level: low
+    tags:
+      - nominal
+      - purchase-order
+    rationale: >
+      The synthetic case represents a known supplier with a matching
+      purchase order and no declared exception indicators.
+
+  - case_id: exact-threshold-match
+    input_data:
+      invoice_amount: 1000.00
+      purchase_order_amount: 1000.00
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: false
+      bank_details_changed: false
+      tax_id_valid: true
+    gold_outcome:
+      decision: RECOMMEND_APPROVE
+    risk_level: low
+    tags:
+      - boundary
+      - purchase-order
+    rationale: >
+      The benchmark treats an exact purchase-order match at this synthetic
+      amount boundary as approvable.
+
+  - case_id: amount-mismatch-small
+    input_data:
+      invoice_amount: 525.00
+      purchase_order_amount: 500.00
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: false
+      bank_details_changed: false
+      tax_id_valid: true
+    gold_outcome:
+      decision: REVIEW
+    risk_level: medium
+    tags:
+      - amount-mismatch
+    rationale: >
+      A declared invoice-to-purchase-order mismatch requires review in the
+      benchmark policy.
+
+  - case_id: amount-mismatch-large
+    input_data:
+      invoice_amount: 5000.00
+      purchase_order_amount: 4000.00
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: false
+      bank_details_changed: false
+      tax_id_valid: true
+    gold_outcome:
+      decision: HOLD
+    risk_level: high
+    tags:
+      - amount-mismatch
+      - high-value
+    rationale: >
+      A large synthetic financial mismatch is labelled as a high-risk hold.
+
+  - case_id: missing-purchase-order
+    input_data:
+      invoice_amount: 800.00
+      purchase_order_amount: null
+      purchase_order_present: false
+      supplier_known: true
+      duplicate_invoice: false
+      bank_details_changed: false
+      tax_id_valid: true
+    gold_outcome:
+      decision: REVIEW
+    risk_level: medium
+    tags:
+      - missing-po
+    rationale: >
+      The benchmark requires review when the expected purchase order is
+      absent.
+
+  - case_id: unknown-supplier
+    input_data:
+      invoice_amount: 700.00
+      purchase_order_amount: 700.00
+      purchase_order_present: true
+      supplier_known: false
+      duplicate_invoice: false
+      bank_details_changed: false
+      tax_id_valid: true
+    gold_outcome:
+      decision: REVIEW
+    risk_level: medium
+    tags:
+      - supplier
+      - identity
+    rationale: >
+      An otherwise matching invoice from an unknown supplier is labelled
+      for review.
+
+  - case_id: duplicate-invoice
+    input_data:
+      invoice_amount: 450.00
+      purchase_order_amount: 450.00
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: true
+      bank_details_changed: false
+      tax_id_valid: true
+    gold_outcome:
+      decision: HOLD
+    risk_level: high
+    tags:
+      - duplicate
+      - fraud-indicator
+    rationale: >
+      A declared duplicate invoice is treated as a high-risk hold.
+
+  - case_id: changed-bank-details
+    input_data:
+      invoice_amount: 900.00
+      purchase_order_amount: 900.00
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: false
+      bank_details_changed: true
+      tax_id_valid: true
+    gold_outcome:
+      decision: HOLD
+    risk_level: critical
+    tags:
+      - bank-details
+      - fraud-indicator
+    rationale: >
+      A declared bank-detail change is treated as a critical exception in
+      this synthetic benchmark.
+
+  - case_id: invalid-tax-id
+    input_data:
+      invoice_amount: 650.00
+      purchase_order_amount: 650.00
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: false
+      bank_details_changed: false
+      tax_id_valid: false
+    gold_outcome:
+      decision: REVIEW
+    risk_level: high
+    tags:
+      - tax
+      - compliance
+    rationale: >
+      An invalid tax identifier requires review under the benchmark policy.
+
+  - case_id: multiple-risk-indicators
+    input_data:
+      invoice_amount: 10000.00
+      purchase_order_amount: 8000.00
+      purchase_order_present: true
+      supplier_known: false
+      duplicate_invoice: true
+      bank_details_changed: true
+      tax_id_valid: false
+    gold_outcome:
+      decision: HOLD
+    risk_level: critical
+    tags:
+      - adversarial
+      - duplicate
+      - bank-details
+      - amount-mismatch
+      - compliance
+    rationale: >
+      Multiple simultaneous exception indicators produce a critical hold.
+
+  - case_id: zero-value-boundary
+    input_data:
+      invoice_amount: 0.00
+      purchase_order_amount: 0.00
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: false
+      bank_details_changed: false
+      tax_id_valid: true
+    gold_outcome:
+      decision: REVIEW
+    risk_level: medium
+    tags:
+      - boundary
+      - zero-value
+    rationale: >
+      A zero-value invoice is intentionally labelled for review to exercise
+      a boundary condition.
+
+  - case_id: negative-value-adversarial
+    input_data:
+      invoice_amount: -250.00
+      purchase_order_amount: -250.00
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: false
+      bank_details_changed: false
+      tax_id_valid: true
+    gold_outcome:
+      decision: REVIEW
+    risk_level: high
+    tags:
+      - adversarial
+      - negative-value
+    rationale: >
+      A negative invoice value is intentionally treated as an anomalous
+      high-risk review case in this synthetic benchmark.
+
+  - case_id: high-value-exact-match
+    input_data:
+      invoice_amount: 1000000.00
+      purchase_order_amount: 1000000.00
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: false
+      bank_details_changed: false
+      tax_id_valid: true
+    gold_outcome:
+      decision: RECOMMEND_APPROVE
+    risk_level: low
+    tags:
+      - scale
+      - high-value
+    rationale: >
+      A large but otherwise nominal exact match exercises numeric scale
+      without introducing an exception.
+
+  - case_id: one-cent-mismatch
+    input_data:
+      invoice_amount: 1000.01
+      purchase_order_amount: 1000.00
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: false
+      bank_details_changed: false
+      tax_id_valid: true
+    gold_outcome:
+      decision: REVIEW
+    risk_level: medium
+    tags:
+      - adversarial
+      - boundary
+      - precision
+      - amount-mismatch
+    rationale: >
+      A one-cent mismatch exercises precision-sensitive comparison near an
+      otherwise exact purchase-order match.
+
+  - case_id: tiny-positive-mismatch
+    input_data:
+      invoice_amount: 1000.000001
+      purchase_order_amount: 1000.00
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: false
+      bank_details_changed: false
+      tax_id_valid: true
+    gold_outcome:
+      decision: REVIEW
+    risk_level: medium
+    tags:
+      - adversarial
+      - boundary
+      - precision
+      - amount-mismatch
+    rationale: >
+      A very small positive mismatch tests whether the candidate silently
+      treats near-equality as exact equality.
+
+  - case_id: inconsistent-po-state
+    input_data:
+      invoice_amount: 750.00
+      purchase_order_amount: null
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: false
+      bank_details_changed: false
+      tax_id_valid: true
+    gold_outcome:
+      decision: REVIEW
+    risk_level: high
+    tags:
+      - adversarial
+      - inconsistent-input
+      - purchase-order
+    rationale: >
+      The purchase-order presence flag conflicts with the missing amount,
+      so the benchmark requires review rather than assuming valid evidence.
+
+  - case_id: high-value-exact-match-invalid-tax
+    input_data:
+      invoice_amount: 250000.00
+      purchase_order_amount: 250000.00
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: false
+      bank_details_changed: false
+      tax_id_valid: false
+    gold_outcome:
+      decision: REVIEW
+    risk_level: high
+    tags:
+      - adversarial
+      - compliance
+      - high-value
+      - precedence
+    rationale: >
+      Compliance failure must take precedence over an otherwise exact
+      high-value purchase-order match.
+
+  - case_id: zero-value-duplicate
+    input_data:
+      invoice_amount: 0.00
+      purchase_order_amount: 0.00
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: true
+      bank_details_changed: false
+      tax_id_valid: true
+    gold_outcome:
+      decision: HOLD
+    risk_level: high
+    tags:
+      - adversarial
+      - boundary
+      - duplicate
+      - precedence
+    rationale: >
+      A duplicate indicator takes precedence over the zero-value boundary
+      condition and requires a hold.
+
+  - case_id: missing-po-with-bank-change
+    input_data:
+      invoice_amount: 1500.00
+      purchase_order_amount: null
+      purchase_order_present: false
+      supplier_known: true
+      duplicate_invoice: false
+      bank_details_changed: true
+      tax_id_valid: true
+    gold_outcome:
+      decision: HOLD
+    risk_level: critical
+    tags:
+      - adversarial
+      - bank-details
+      - missing-po
+      - precedence
+    rationale: >
+      A bank-detail change remains a critical hold even when purchase-order
+      evidence is also missing.
+
+  - case_id: negative-value-with-duplicate
+    input_data:
+      invoice_amount: -500.00
+      purchase_order_amount: -500.00
+      purchase_order_present: true
+      supplier_known: true
+      duplicate_invoice: true
+      bank_details_changed: false
+      tax_id_valid: true
+    gold_outcome:
+      decision: HOLD
+    risk_level: critical
+    tags:
+      - adversarial
+      - negative-value
+      - duplicate
+      - precedence
+    rationale: >
+      A duplicate indicator takes precedence over a negative-value anomaly
+      and produces a critical hold.
