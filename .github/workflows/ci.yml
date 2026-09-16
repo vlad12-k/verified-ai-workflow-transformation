@@ -42,7 +42,7 @@ jobs:
         run: python -m pip install --upgrade pip
 
       - name: Install project
-        run: python -m pip install -e ".[dev,ml,torch,embeddings]"
+        run: python -m pip install -e ".[dev,ml,torch,embeddings,slm]"
 
       - name: Ruff
         run: ruff check .

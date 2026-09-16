@@ -46,6 +46,10 @@ embeddings = [
     "sentence-transformers>=6.0,<7.0",
 ]
 
+slm = [
+    "transformers>=5.17,<6.0",
+]
+
 [project.scripts]
 vait = "vait.cli:app"
 
