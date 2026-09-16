@@ -1,0 +1,55 @@
+{
+  "benchmark_id": "ap-policy-rag",
+  "benchmark_version": "0.1",
+  "experiment_id": "ap-policy-rag-qwen-v0.1",
+  "annotations": [
+    {
+      "case_id": "duplicate-01",
+      "answer_sha256": "4772c6d124221b0c1d22b3fa16bab2295c2f072b19abd9d6a7080e7551646cfe",
+      "verdict": "UNSUPPORTED",
+      "rationale": "The answer adds approval authority, supplier misrepresentation, invoice comparison, and legal or internal-audit procedures that are not stated in the supplied policy."
+    },
+    {
+      "case_id": "bank-01",
+      "answer_sha256": "f93087c7a25948faf91a5464aa72bff4ef1389f35e78b79a9837809387393b45",
+      "verdict": "SUPPORTED",
+      "rationale": "The answer states that independent verification must occur before payment, which is directly supported by the supplied policy."
+    },
+    {
+      "case_id": "missing-po-01",
+      "answer_sha256": "f4c0bd47953becb503c44f164895fb4619062619034bb882cb6b62458612656c",
+      "verdict": "PARTIAL",
+      "rationale": "Manual review is supported, but the answer omits the policy exception for an approved exception case and therefore overstates the rule."
+    },
+    {
+      "case_id": "mismatch-01",
+      "answer_sha256": "3f3815a30da006b9ef4d8765ac43bc10a105e3a33cde8b1988e8f71b13ec1d1f",
+      "verdict": "UNSUPPORTED",
+      "rationale": "The answer incorrectly promotes escalation to the primary action. The policy requires review for any non-zero difference and only states that large differences may require escalation."
+    },
+    {
+      "case_id": "supplier-01",
+      "answer_sha256": "8da6768ed8c3936a2620e78d77e808109a91dde6853d81a59829a59e954158e1",
+      "verdict": "SUPPORTED",
+      "rationale": "The answer states that invoices from vendors outside the approved supplier master must be reviewed before processing, matching the supplied policy."
+    },
+    {
+      "case_id": "tax-01",
+      "answer_sha256": "2d723da084e294f4adf638ec56671642bdddaa75fbbb47a4606278466fa4e0ed",
+      "verdict": "UNSUPPORTED",
+      "rationale": "The answer invents additional documentation, supplier identity checks, and discrepancy-review procedures that are not present in the supplied policy."
+    },
+    {
+      "case_id": "non-positive-01",
+      "answer_sha256": "bd5483b120d78e04c9c4092bdbd9d2d672bfa90cc8b11f06214099df50214288",
+      "verdict": "UNSUPPORTED",
+      "rationale": "Although review is supported, the answer adds fraud checks, purchase-order checks, customer identity verification, and transaction verification that are not stated in the policy."
+    },
+    {
+      "case_id": "approval-01",
+      "answer_sha256": "8aaa9c0f4ba899190b3ad3f6be814dc6b527d193f5b12488103045c3c41f80b6",
+      "verdict": "PARTIAL",
+      "rationale": "The requirement for an appropriately senior approver is supported, but the answer adds unsupported claims about transparency, accountability, and the highest levels of management."
+    }
+  ]
+}
