@@ -1,6 +1,9 @@
 """Tests for versioned benchmark quality policies."""
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -108,3 +111,32 @@ def test_quality_artifact_is_written_as_json(
     assert payload["policy"]["min_adversarial_cases"] == 9
     assert len(payload["dataset_fingerprint_sha256"]) == 64
     assert len(payload["quality_policy_fingerprint_sha256"]) == 64
+
+
+def test_quality_policy_fingerprint_is_stable_across_hash_seeds() -> None:
+    """Policy fingerprints must remain stable across Python processes."""
+    script = (
+        "from vait.benchmark.quality_policy import "
+        "load_quality_policy, quality_policy_fingerprint; "
+        "document = load_quality_policy("
+        "'datasets/ap_invoice_exceptions/v0.2/quality-policy.yaml'); "
+        "print(quality_policy_fingerprint(document))"
+    )
+
+    fingerprints: list[str] = []
+
+    for seed in ("1", "2", "3", "42"):
+        environment = os.environ.copy()
+        environment["PYTHONHASHSEED"] = seed
+
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+
+        fingerprints.append(completed.stdout.strip())
+
+    assert len(set(fingerprints)) == 1

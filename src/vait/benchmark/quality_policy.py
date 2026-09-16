@@ -63,7 +63,26 @@ def quality_policy_fingerprint(
     document: BenchmarkQualityPolicyDocument,
 ) -> str:
     """Return a deterministic SHA-256 fingerprint for a quality policy."""
-    payload = document.model_dump(mode="json")
+    policy = document.policy
+
+    payload = {
+        "benchmark_id": document.benchmark_id,
+        "benchmark_version": document.benchmark_version,
+        "policy": {
+            "min_total_cases": policy.min_total_cases,
+            "min_cases_per_risk": {
+                risk.value: minimum
+                for risk, minimum in sorted(
+                    policy.min_cases_per_risk.items(),
+                    key=lambda item: item[0].value,
+                )
+            },
+            "required_tags": sorted(policy.required_tags),
+            "min_adversarial_cases": policy.min_adversarial_cases,
+            "min_boundary_cases": policy.min_boundary_cases,
+            "allow_exact_duplicates": policy.allow_exact_duplicates,
+        },
+    }
 
     encoded = json.dumps(
         payload,
