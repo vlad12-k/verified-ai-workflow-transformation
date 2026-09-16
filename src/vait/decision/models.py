@@ -23,6 +23,8 @@ class FailureCode(StrEnum):
     FORBIDDEN_EFFECT = "forbidden_effect"
     EXECUTION_ERROR = "execution_error"
     INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+    STATISTICAL_THRESHOLD_EXCEEDED = "statistical_threshold_exceeded"
+    RISK_THRESHOLD_EXCEEDED = "risk_threshold_exceeded"
 
 
 class ExecutionObservation(BaseModel):

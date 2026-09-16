@@ -29,7 +29,8 @@ dev = [
     "hypothesis>=6.0,<7.0",
     "ruff>=0.6,<1.0",
     "mypy>=1.11,<2.0",
-    "types-PyYAML>=6.0"
+    "types-PyYAML>=6.0",
+    "scipy-stubs"
 ]
 
 [project.scripts]

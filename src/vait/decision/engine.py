@@ -13,3 +13,13 @@ def decide_exact_or_reject(
         return Decision.REJECT
 
     return Decision.EXACT
+
+
+def decide_bounded_or_reject(
+    failures: Sequence[VerificationFailure],
+) -> Decision:
+    """Classify bounded statistical verification evidence."""
+    if failures:
+        return Decision.REJECT
+
+    return Decision.BOUNDED

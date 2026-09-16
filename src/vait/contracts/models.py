@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, JsonValue, model_validator
 
 
 class RiskLevel(StrEnum):
-    """Business-risk classification for a transformation."""
+    """Business-risk classification for a transformation or evaluation case."""
 
     LOW = "low"
     MEDIUM = "medium"
@@ -63,6 +63,18 @@ class ExactVerificationScope(BaseModel):
     exhaustive_case_ids: frozenset[str] = Field(min_length=1)
 
 
+class BoundedVerificationPolicy(BaseModel):
+    """Pre-declared thresholds for statistical bounded verification."""
+
+    max_overall_disagreement_rate: float = Field(ge=0.0, le=1.0)
+    max_high_risk_disagreement_rate: float = Field(ge=0.0, le=1.0)
+
+    confidence_level: float = Field(default=0.95, gt=0.5, lt=1.0)
+
+    min_total_cases: int = Field(default=1, ge=1)
+    min_high_risk_cases: int = Field(default=0, ge=0)
+
+
 class TransformationContract(BaseModel):
     """Contract governing whether a candidate transformation is admissible."""
 
@@ -73,7 +85,9 @@ class TransformationContract(BaseModel):
     candidate_implementation_id: str = Field(min_length=1)
 
     risk: RiskConstraint
+
     exact_verification_scope: ExactVerificationScope | None = None
+    bounded_verification: BoundedVerificationPolicy | None = None
 
     invariants: list[Invariant] = Field(default_factory=list)
     allowed_effects: set[Effect] = Field(default_factory=lambda: {Effect.NONE})
@@ -94,7 +108,8 @@ class TransformationContract(BaseModel):
 
 
 class VerificationCase(BaseModel):
-    """A single deterministic verification input."""
+    """A single verification input with declared business risk."""
 
     id: str = Field(min_length=1)
     input_data: dict[str, JsonValue]
+    risk_level: RiskLevel = RiskLevel.LOW
