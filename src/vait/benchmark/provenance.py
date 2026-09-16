@@ -27,6 +27,8 @@ _TRACKED_PACKAGES = (
     "scipy",
     "pandas",
     "PyYAML",
+    "scikit-learn",
+    "xgboost",
 )
 
 

@@ -33,6 +33,11 @@ dev = [
     "scipy-stubs"
 ]
 
+ml = [
+    "scikit-learn>=1.5,<2.0",
+    "xgboost>=2.1,<4.0",
+]
+
 [project.scripts]
 vait = "vait.cli:app"
 

@@ -19,7 +19,7 @@ from vait.transformations.applicability import (
     ApplicabilityContext,
     ApplicabilityResult,
 )
-from vait.transformations.python_rule import PythonRuleTransformation
+from vait.transformations.python_callable import PythonCallableTransformation
 
 
 class TransformationAssessment(BaseModel):
@@ -76,15 +76,15 @@ class TransformationAssessmentReport(BaseModel):
     assessments: tuple[TransformationAssessment, ...] = ()
 
 
-def assess_python_rule_transformations(
+def assess_python_transformations(
     *,
     dataset: BenchmarkDataset,
-    transformations: Iterable[PythonRuleTransformation],
+    transformations: Iterable[PythonCallableTransformation],
     context: ApplicabilityContext,
     policy: BoundedVerificationPolicy,
     allowed_effects: Iterable[Effect] = (Effect.NONE,),
 ) -> TransformationAssessmentReport:
-    """Assess supplied Python-rule transformations independently."""
+    """Assess supplied Python-backed transformations independently."""
     assessments: list[TransformationAssessment] = []
 
     ordered_transformations = sorted(
@@ -133,4 +133,21 @@ def assess_python_rule_transformations(
         benchmark_id=dataset.benchmark_id,
         benchmark_version=dataset.version,
         assessments=tuple(assessments),
+    )
+
+def assess_python_rule_transformations(
+    *,
+    dataset: BenchmarkDataset,
+    transformations: Iterable[PythonCallableTransformation],
+    context: ApplicabilityContext,
+    policy: BoundedVerificationPolicy,
+    allowed_effects: Iterable[Effect] = (Effect.NONE,),
+) -> TransformationAssessmentReport:
+    """Assess Python transformations through the legacy public entry point."""
+    return assess_python_transformations(
+        dataset=dataset,
+        transformations=transformations,
+        context=context,
+        policy=policy,
+        allowed_effects=allowed_effects,
     )
