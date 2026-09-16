@@ -104,3 +104,29 @@ def test_execution_errors_are_reported() -> None:
         result.error is not None
         for result in report.case_results
     )
+
+
+def test_benchmark_report_contains_provenance() -> None:
+    """Benchmark evaluation should include reproducibility metadata."""
+    report = evaluate_benchmark(
+        dataset=build_dataset(),
+        candidate=PythonImplementationRunner(
+            implementation_id="provenance-candidate",
+            function=identity_candidate,
+        ),
+        candidate_configuration={
+            "mode": "deterministic",
+        },
+    )
+
+    assert report.provenance is not None
+    assert (
+        report.provenance.candidate_implementation_id
+        == "provenance-candidate"
+    )
+    assert report.provenance.candidate_configuration == {
+        "mode": "deterministic",
+    }
+
+    assert report.candidate_latency is not None
+    assert report.candidate_latency.count == 3

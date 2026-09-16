@@ -1,9 +1,17 @@
 """Evaluation of implementations against versioned VAIT benchmarks."""
 
+from collections.abc import Mapping
+
+from pydantic import JsonValue
+
 from vait.benchmark.models import (
     BenchmarkCaseResult,
     BenchmarkDataset,
     BenchmarkReport,
+)
+from vait.benchmark.provenance import (
+    build_experiment_provenance,
+    summarize_latencies,
 )
 from vait.contracts.models import RiskLevel, VerificationCase
 from vait.runners.base import ImplementationRunner
@@ -14,6 +22,7 @@ _HIGH_RISK_LEVELS = frozenset({RiskLevel.HIGH, RiskLevel.CRITICAL})
 def evaluate_benchmark(
     dataset: BenchmarkDataset,
     candidate: ImplementationRunner,
+    candidate_configuration: Mapping[str, JsonValue] | None = None,
 ) -> BenchmarkReport:
     """Evaluate one implementation against benchmark gold outcomes."""
     case_results: list[BenchmarkCaseResult] = []
@@ -80,5 +89,14 @@ def evaluate_benchmark(
         high_risk_failures=high_risk_failures,
         high_risk_agreement_rate=high_risk_agreement_rate,
         execution_errors=execution_errors,
+        candidate_latency=summarize_latencies(
+            result.latency_ms
+            for result in case_results
+        ),
+        provenance=build_experiment_provenance(
+            dataset=dataset,
+            candidate=candidate,
+            candidate_configuration=candidate_configuration,
+        ),
         case_results=case_results,
     )

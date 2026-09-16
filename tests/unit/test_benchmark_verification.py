@@ -120,3 +120,29 @@ def test_high_risk_gold_mismatch_can_reject_candidate() -> None:
         failure.code is FailureCode.RISK_THRESHOLD_EXCEEDED
         for failure in report.failures
     )
+
+
+def test_bounded_benchmark_report_contains_provenance() -> None:
+    """Bounded benchmark verification should preserve run provenance."""
+    report = verify_benchmark_bounded(
+        dataset=build_dataset(),
+        candidate=build_candidate(),
+        policy=BoundedVerificationPolicy(
+            max_overall_disagreement_rate=0.60,
+            max_high_risk_disagreement_rate=0.80,
+            confidence_level=0.95,
+            min_total_cases=4,
+            min_high_risk_cases=2,
+        ),
+        candidate_configuration={
+            "policy_version": "test-v1",
+        },
+    )
+
+    assert report.provenance is not None
+    assert report.provenance.candidate_configuration == {
+        "policy_version": "test-v1",
+    }
+
+    assert report.candidate_latency is not None
+    assert report.candidate_latency.count == 4

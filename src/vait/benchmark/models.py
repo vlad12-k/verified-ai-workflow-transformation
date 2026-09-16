@@ -1,5 +1,7 @@
 """Domain models for versioned VAIT benchmark datasets and reports."""
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field, JsonValue, model_validator
 
 from vait.contracts.models import RiskLevel
@@ -37,6 +39,37 @@ class BenchmarkDataset(BaseModel):
         return self
 
 
+class LatencySummary(BaseModel):
+    """Latency statistics for one benchmark execution."""
+
+    count: int = Field(ge=1)
+    mean_ms: float = Field(ge=0.0)
+    p50_ms: float = Field(ge=0.0)
+    p95_ms: float = Field(ge=0.0)
+    max_ms: float = Field(ge=0.0)
+
+
+class ExperimentProvenance(BaseModel):
+    """Reproducibility metadata attached to one benchmark run."""
+
+    run_id: str = Field(min_length=1)
+    created_at: datetime
+
+    dataset_fingerprint_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$"
+    )
+
+    candidate_implementation_id: str = Field(min_length=1)
+    candidate_runner_type: str = Field(min_length=1)
+    candidate_configuration: dict[str, JsonValue] = Field(
+        default_factory=dict
+    )
+
+    python_version: str = Field(min_length=1)
+    platform: str = Field(min_length=1)
+    package_versions: dict[str, str] = Field(default_factory=dict)
+
+
 class BenchmarkCaseResult(BaseModel):
     """Evaluation result for one benchmark case."""
 
@@ -67,5 +100,8 @@ class BenchmarkReport(BaseModel):
     high_risk_agreement_rate: float = Field(ge=0.0, le=1.0)
 
     execution_errors: int = Field(ge=0)
+
+    candidate_latency: LatencySummary | None = None
+    provenance: ExperimentProvenance | None = None
 
     case_results: list[BenchmarkCaseResult] = Field(default_factory=list)

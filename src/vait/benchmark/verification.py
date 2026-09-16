@@ -1,11 +1,19 @@
 """Integration between benchmark evidence and VAIT verification."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, JsonValue
 
 from vait.benchmark.gold_runner import GoldBenchmarkRunner
-from vait.benchmark.models import BenchmarkDataset
+from vait.benchmark.models import (
+    BenchmarkDataset,
+    ExperimentProvenance,
+    LatencySummary,
+)
+from vait.benchmark.provenance import (
+    build_experiment_provenance,
+    summarize_latencies,
+)
 from vait.contracts.models import (
     BoundedVerificationPolicy,
     Effect,
@@ -38,6 +46,9 @@ class BenchmarkVerificationReport(BaseModel):
     decision: Decision
 
     statistical_evidence: StatisticalEvidence | None = None
+    candidate_latency: LatencySummary | None = None
+    provenance: ExperimentProvenance | None = None
+
     failures: list[VerificationFailure] = Field(default_factory=list)
 
 
@@ -46,6 +57,7 @@ def verify_benchmark_bounded(
     candidate: ImplementationRunner,
     policy: BoundedVerificationPolicy,
     allowed_effects: Iterable[Effect] = (Effect.NONE,),
+    candidate_configuration: Mapping[str, JsonValue] | None = None,
 ) -> BenchmarkVerificationReport:
     """Verify a candidate against benchmark gold labels under a bounded policy."""
     gold_implementation_id = (
@@ -102,5 +114,14 @@ def verify_benchmark_bounded(
         cases_evaluated=len(cases),
         decision=result.decision,
         statistical_evidence=result.statistical_evidence,
+        candidate_latency=summarize_latencies(
+            observation.latency_ms
+            for observation in result.candidate_observations
+        ),
+        provenance=build_experiment_provenance(
+            dataset=dataset,
+            candidate=candidate,
+            candidate_configuration=candidate_configuration,
+        ),
         failures=result.failures,
     )
