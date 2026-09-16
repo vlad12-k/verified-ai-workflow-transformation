@@ -111,6 +111,7 @@ def assess_python_transformations(
             policy=policy,
             allowed_effects=allowed_effects,
             candidate_configuration={
+                **transformation.configuration,
                 "transformation_id": (
                     transformation.descriptor.transformation_id
                 ),

@@ -16,6 +16,24 @@ AP_DECISIONS = frozenset(
     }
 )
 
+_REVIEW_MISMATCH_DIFFERENCES = (
+    0.000001,
+    0.01,
+    0.10,
+    1.00,
+    25.00,
+    250.00,
+    999.99,
+)
+
+_HOLD_MISMATCH_DIFFERENCES = (
+    1000.00,
+    1000.01,
+    1250.00,
+    2500.00,
+    10_000.00,
+)
+
 
 class APTrainingCase(BaseModel):
     """One supervised synthetic AP training example."""
@@ -144,53 +162,80 @@ def _generate_input(
         return base
 
     if target_class == 1:
-        review_scenario = rng.randrange(5)
+        review_scenario = rng.randrange(6)
 
         if review_scenario == 0:
             base["purchase_order_present"] = False
             base["purchase_order_amount"] = None
+
         elif review_scenario == 1:
             base["supplier_known"] = False
+
         elif review_scenario == 2:
             base["tax_id_valid"] = False
+
         elif review_scenario == 3:
-            difference = round(
-                rng.uniform(0.01, 999.99),
-                2,
+            difference = rng.choice(
+                _REVIEW_MISMATCH_DIFFERENCES
             )
             base["purchase_order_amount"] = round(
                 invoice_amount + difference,
-                2,
+                6,
             )
-        else:
-            non_positive_amount = -round(
-                rng.uniform(0.01, 5000.0),
-                2,
-            )
+
+        elif review_scenario == 4:
+            if rng.random() < 0.5:
+                non_positive_amount = 0.0
+            else:
+                non_positive_amount = -round(
+                    rng.uniform(0.01, 5000.0),
+                    2,
+                )
+
             base["invoice_amount"] = non_positive_amount
             base["purchase_order_amount"] = non_positive_amount
+
+        else:
+            base["purchase_order_present"] = True
+            base["purchase_order_amount"] = None
 
         return base
 
     if target_class == 2:
-        hold_scenario = rng.randrange(4)
+        hold_scenario = rng.randrange(6)
 
         if hold_scenario == 0:
             base["duplicate_invoice"] = True
+
         elif hold_scenario == 1:
             base["bank_details_changed"] = True
+
         elif hold_scenario == 2:
-            difference = round(
-                rng.uniform(1000.0, 10_000.0),
-                2,
+            difference = rng.choice(
+                _HOLD_MISMATCH_DIFFERENCES
             )
             base["purchase_order_amount"] = round(
                 invoice_amount + difference,
+                6,
+            )
+
+        elif hold_scenario == 3:
+            negative_amount = -round(
+                rng.uniform(0.01, 5000.0),
                 2,
             )
-        else:
+            base["invoice_amount"] = negative_amount
+            base["purchase_order_amount"] = negative_amount
             base["duplicate_invoice"] = True
+
+        elif hold_scenario == 4:
+            base["purchase_order_present"] = False
+            base["purchase_order_amount"] = None
+            base["bank_details_changed"] = True
+
+        else:
             base["supplier_known"] = False
+            base["duplicate_invoice"] = True
             base["tax_id_valid"] = False
 
         return base

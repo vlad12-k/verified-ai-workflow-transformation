@@ -126,3 +126,86 @@ def test_sample_count_below_minimum_is_rejected() -> None:
         build_synthetic_ap_training_corpus(
             sample_count=2,
         )
+
+
+def test_training_corpus_covers_precision_and_threshold_boundaries() -> None:
+    """Training data should represent both sides of mismatch boundaries."""
+    corpus = build_synthetic_ap_training_corpus(
+        sample_count=600,
+        seed=20260916,
+    )
+
+    precision_reviews = []
+    threshold_holds = []
+
+    for case in corpus.cases:
+        invoice_amount = case.input_data["invoice_amount"]
+        purchase_order_amount = case.input_data[
+            "purchase_order_amount"
+        ]
+
+        if not isinstance(invoice_amount, (int, float)):
+            continue
+
+        if not isinstance(
+            purchase_order_amount,
+            (int, float),
+        ):
+            continue
+
+        difference = abs(
+            float(invoice_amount)
+            - float(purchase_order_amount)
+        )
+
+        if (
+            case.label == "REVIEW"
+            and 0.0 < difference <= 0.01
+        ):
+            precision_reviews.append(case.case_id)
+
+        if (
+            case.label == "HOLD"
+            and 1000.0 <= difference <= 1000.01
+        ):
+            threshold_holds.append(case.case_id)
+
+    assert precision_reviews
+    assert threshold_holds
+
+
+def test_training_corpus_covers_precedence_combinations() -> None:
+    """High-risk indicators should appear with conflicting review signals."""
+    corpus = build_synthetic_ap_training_corpus(
+        sample_count=600,
+        seed=20260916,
+    )
+
+    bank_change_with_missing_po = any(
+        case.label == "HOLD"
+        and case.input_data["bank_details_changed"] is True
+        and case.input_data["purchase_order_present"] is False
+        for case in corpus.cases
+    )
+
+    duplicate_with_negative_value = any(
+        case.label == "HOLD"
+        and case.input_data["duplicate_invoice"] is True
+        and isinstance(
+            case.input_data["invoice_amount"],
+            (int, float),
+        )
+        and float(case.input_data["invoice_amount"]) < 0.0
+        for case in corpus.cases
+    )
+
+    inconsistent_purchase_order = any(
+        case.label == "REVIEW"
+        and case.input_data["purchase_order_present"] is True
+        and case.input_data["purchase_order_amount"] is None
+        for case in corpus.cases
+    )
+
+    assert bank_change_with_missing_po
+    assert duplicate_with_negative_value
+    assert inconsistent_purchase_order

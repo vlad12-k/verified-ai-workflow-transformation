@@ -1,6 +1,8 @@
 """Transformation support for supplied Python-callable candidates."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from pydantic import JsonValue
 
 from vait.runners.python_runner import (
     ImplementationFunction,
@@ -35,6 +37,7 @@ class PythonCallableTransformation:
     descriptor: TransformationDescriptor
     implementation_id: str
     function: ImplementationFunction
+    configuration: dict[str, JsonValue] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate local transformation configuration."""
