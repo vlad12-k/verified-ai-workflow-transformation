@@ -4,6 +4,9 @@ from pathlib import Path
 
 from vait.benchmark.models import BenchmarkReport
 from vait.benchmark.quality_policy import BenchmarkQualityArtifact
+from vait.benchmark.transformation_assessment import (
+    TransformationAssessmentReport,
+)
 from vait.benchmark.verification import BenchmarkVerificationReport
 
 
@@ -12,6 +15,7 @@ def write_benchmark_report(
         BenchmarkReport
         | BenchmarkVerificationReport
         | BenchmarkQualityArtifact
+        | TransformationAssessmentReport
     ),
     path: str | Path,
 ) -> Path:

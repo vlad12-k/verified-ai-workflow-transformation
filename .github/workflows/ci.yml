@@ -57,3 +57,5 @@ jobs:
           python examples/verify_ap_benchmark.py
           python examples/check_ap_benchmark_quality.py
           python examples/check_ap_benchmark_v02_quality.py
+          python examples/verify_ap_transformation_v02.py
+          python examples/assess_ap_transformations_v02.py

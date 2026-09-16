@@ -37,3 +37,31 @@ def test_benchmark_report_is_written_as_json(
     assert payload["benchmark_id"] == "report-test"
     assert payload["gold_matches"] == 9
     assert payload["high_risk_failures"] == 1
+
+
+def test_transformation_assessment_report_is_written_as_json(
+    tmp_path: Path,
+) -> None:
+    """Transformation assessments should be persisted as machine-readable JSON."""
+    from vait.benchmark.transformation_assessment import (
+        TransformationAssessmentReport,
+    )
+
+    report = TransformationAssessmentReport(
+        benchmark_id="assessment-test",
+        benchmark_version="0.2",
+    )
+
+    output_path = write_benchmark_report(
+        report,
+        tmp_path / "nested" / "assessment.json",
+    )
+
+    payload = json.loads(
+        output_path.read_text(encoding="utf-8")
+    )
+
+    assert output_path.is_file()
+    assert payload["benchmark_id"] == "assessment-test"
+    assert payload["benchmark_version"] == "0.2"
+    assert payload["assessments"] == []
