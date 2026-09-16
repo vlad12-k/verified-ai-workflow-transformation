@@ -3,10 +3,11 @@
 from pathlib import Path
 
 from vait.benchmark.models import BenchmarkReport
+from vait.benchmark.verification import BenchmarkVerificationReport
 
 
 def write_benchmark_report(
-    report: BenchmarkReport,
+    report: BenchmarkReport | BenchmarkVerificationReport,
     path: str | Path,
 ) -> Path:
     """Write a benchmark report as formatted JSON."""
