@@ -17,6 +17,10 @@ class CandidateConfiguration(BaseModel):
 
     configuration: InferenceConfiguration
 
+    required_capabilities: frozenset[str] = Field(
+        default_factory=frozenset,
+    )
+
     metadata: dict[str, JsonValue] = Field(
         default_factory=dict,
     )
@@ -42,6 +46,10 @@ class InferenceCandidate(BaseModel):
     )
 
     requires_verification: bool = True
+
+    required_capabilities: frozenset[str] = Field(
+        default_factory=frozenset,
+    )
 
     metadata: dict[str, JsonValue] = Field(
         default_factory=dict,
@@ -146,6 +154,10 @@ class InferenceSearchPoint(BaseModel):
 
     requires_verification: bool
 
+    required_capabilities: frozenset[str] = Field(
+        default_factory=frozenset,
+    )
+
     candidate_metadata: dict[str, JsonValue] = Field(
         default_factory=dict,
     )
@@ -191,6 +203,10 @@ def enumerate_search_points(
                     ),
                     requires_verification=(
                         candidate.requires_verification
+                    ),
+                    required_capabilities=(
+                        candidate.required_capabilities
+                        | candidate_configuration.required_capabilities
                     ),
                     candidate_metadata=dict(
                         candidate.metadata
