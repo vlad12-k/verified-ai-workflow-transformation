@@ -104,6 +104,19 @@ def test_environment_capture_contains_reproducibility_metadata() -> None:
     assert environment.system
     assert environment.machine
     assert environment.processor
+
+    if environment.logical_cpu_count is not None:
+        assert environment.logical_cpu_count >= 1
+
+    if environment.physical_memory_bytes is not None:
+        assert environment.physical_memory_bytes >= 1
+
+    if environment.source_revision is not None:
+        assert len(environment.source_revision) >= 7
+
+    if environment.source_dirty is not None:
+        assert isinstance(environment.source_dirty, bool)
+
     assert "torch" in environment.package_versions
     assert "transformers" in environment.package_versions
 

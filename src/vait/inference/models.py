@@ -123,6 +123,18 @@ class InferenceEnvironment(BaseModel):
     machine: str = Field(min_length=1)
     processor: str = Field(min_length=1)
 
+    logical_cpu_count: int | None = Field(
+        default=None,
+        ge=1,
+    )
+    physical_memory_bytes: int | None = Field(
+        default=None,
+        ge=1,
+    )
+
+    source_revision: str | None = None
+    source_dirty: bool | None = None
+
     package_versions: dict[str, str] = Field(default_factory=dict)
 
 

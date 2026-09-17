@@ -1,5 +1,6 @@
 """Controlled inference benchmark evidence utilities."""
 
+import os
 import platform
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -7,6 +8,11 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from math import ceil, isfinite
 from statistics import fmean
+from subprocess import (
+    CalledProcessError,
+    TimeoutExpired,
+    run,
+)
 from time import perf_counter_ns
 from uuid import uuid4
 
@@ -130,8 +136,9 @@ def summarize_generative_samples(
 
 
 def capture_inference_environment() -> InferenceEnvironment:
-    """Capture portable environment metadata for inference evidence."""
+    """Capture portable environment and source provenance."""
     processor = platform.processor().strip() or "unknown"
+    source_revision, source_dirty = _git_source_provenance()
 
     return InferenceEnvironment(
         python_version=platform.python_version(),
@@ -139,6 +146,10 @@ def capture_inference_environment() -> InferenceEnvironment:
         system=platform.system() or "unknown",
         machine=platform.machine() or "unknown",
         processor=processor,
+        logical_cpu_count=os.cpu_count(),
+        physical_memory_bytes=_physical_memory_bytes(),
+        source_revision=source_revision,
+        source_dirty=source_dirty,
         package_versions=_installed_package_versions(),
     )
 
@@ -405,6 +416,54 @@ def _rate(
         return None
 
     return count / elapsed_seconds
+
+
+def _physical_memory_bytes() -> int | None:
+    """Return total physical memory using portable POSIX sysconf when available."""
+    try:
+        page_size = int(os.sysconf("SC_PAGE_SIZE"))
+        physical_pages = int(os.sysconf("SC_PHYS_PAGES"))
+    except (AttributeError, OSError, ValueError):
+        return None
+
+    total_bytes = page_size * physical_pages
+
+    if total_bytes <= 0:
+        return None
+
+    return total_bytes
+
+
+def _git_source_provenance() -> tuple[str | None, bool | None]:
+    """Return Git revision and working-tree state when Git is available."""
+    try:
+        revision_result = run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+        )
+        status_result = run(
+            ["git", "status", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+        )
+    except (
+        CalledProcessError,
+        FileNotFoundError,
+        TimeoutExpired,
+    ):
+        return None, None
+
+    revision = revision_result.stdout.strip()
+
+    return (
+        revision or None,
+        bool(status_result.stdout.strip()),
+    )
 
 
 def _installed_package_versions() -> dict[str, str]:
