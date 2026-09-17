@@ -2,7 +2,7 @@
 
 VAIT is a provider-neutral verification and evaluation layer for assessing
 supplied AI workflow transformation candidates under explicit behavioural,
-risk, statistical, latency, and eventually cost constraints.
+risk, statistical, latency, and economic evidence.
 
 The project asks a narrower question than a general AI optimiser:
 
@@ -92,6 +92,28 @@ This creates:
 
 The report groups evidence by compatible task family and explicitly disables
 cross-task ranking and automatic candidate selection.
+
+## Cost and performance evidence
+
+VAIT can attach provider-neutral economic evidence to a benchmark verification
+report without allowing cost to override behavioural or risk failures.
+
+The controlled M2 experiment can be run with:
+
+    python examples/evaluate_ap_cost_performance_v01.py
+
+It writes:
+
+    artifacts/benchmarks/ap-v0.2-cost-performance-evidence-v0.1.json
+
+The current scenario uses declared development-only cost assumptions to
+exercise the evidence pipeline. These values are not provider prices,
+production cost estimates, or ROI claims.
+
+Candidate latency is measured in the current execution environment. The AP
+benchmark gold-label runner is not treated as a timed reference
+implementation, so comparative reference latency and latency deltas are not
+reported unless a genuinely measured reference is available.
 
 ## Engineering quality
 

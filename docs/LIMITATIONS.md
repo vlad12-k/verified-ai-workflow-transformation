@@ -56,9 +56,19 @@ VAIT may report declared privacy-related metadata in future versions, but v0.1 d
 
 Passing a VAIT contract does not imply compliance with GDPR, financial regulation, internal audit requirements, or any other external standard.
 
-## 10. Provider measurements are time-dependent
+## 10. Cost and latency evidence is conditional
 
-Latency and cost measurements depend on provider, model version, geography, pricing, load, and measurement time. Reports must preserve the relevant version/timestamp metadata when available.
+Latency and cost measurements depend on implementation, provider, model
+version, hardware, geography, pricing, load, and measurement time. Reports
+must preserve relevant provenance when available.
+
+Declared or controlled cost assumptions are evidence-pipeline inputs, not
+claims about current provider pricing, production operating cost, or ROI.
+
+A frozen benchmark gold-label runner is not a timed reference implementation.
+Its placeholder latency must not be used to calculate or claim comparative
+performance. Reference-versus-candidate latency deltas require genuinely
+measured and comparable execution evidence on both sides.
 
 ## 11. Benchmark claims must remain scoped
 

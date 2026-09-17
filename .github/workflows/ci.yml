@@ -82,3 +82,4 @@ jobs:
           python examples/assess_ap_transformations_v02.py
           python examples/verify_ap_ml_candidates_v02.py
           python examples/verify_ap_torch_candidate_v02.py
+          python examples/evaluate_ap_cost_performance_v01.py
