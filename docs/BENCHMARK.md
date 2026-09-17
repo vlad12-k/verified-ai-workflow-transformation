@@ -125,19 +125,29 @@ The implementation must not report "zero risk" from zero observed failures.
 
 ### Performance metrics
 
-- reference p50/p95 latency where measurable;
+- reference p50/p95 latency where genuinely measurable;
 - candidate p50/p95 latency;
-- latency delta.
+- latency delta only when both sides are measured comparably.
+
+A frozen gold-label runner is behavioural reference evidence, not a timed
+reference implementation. Its placeholder execution latency must not be used
+to claim a speedup, slowdown, or comparative latency delta.
 
 ### Economic metrics
 
-Where measurable:
+Where evidence is supplied:
 
-- estimated reference execution cost per case;
-- estimated candidate execution cost per case;
-- cost delta.
+- declared, estimated, or measured reference execution cost per case;
+- declared, estimated, or measured candidate execution cost per case;
+- absolute cost delta;
+- relative cost delta where the reference cost is non-zero;
+- currency, evidence kind, source, and optional pricing-version metadata.
 
-Cost evidence must not override failed risk constraints.
+Controlled development cost assumptions may be used to validate the evidence
+pipeline, but they must be explicitly distinguished from provider pricing,
+production costs, and ROI claims.
+
+Cost evidence must not override failed behavioural or risk constraints.
 
 ## 7. Decision examples
 
