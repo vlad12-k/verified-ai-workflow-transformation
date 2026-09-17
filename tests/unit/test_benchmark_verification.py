@@ -149,33 +149,12 @@ def test_bounded_benchmark_report_contains_provenance() -> None:
         "policy_version": "test-v1",
     }
 
-    assert report.reference_latency is not None
-    assert report.reference_latency.count == 4
+    assert report.reference_latency is None
 
     assert report.candidate_latency is not None
     assert report.candidate_latency.count == 4
 
-    assert report.economic_evidence is not None
-    assert report.economic_evidence.cost is None
-
-    latency = report.economic_evidence.latency
-
-    assert latency is not None
-    assert latency.reference == report.reference_latency
-    assert latency.candidate == report.candidate_latency
-
-    assert latency.mean_delta_ms == (
-        report.candidate_latency.mean_ms
-        - report.reference_latency.mean_ms
-    )
-    assert latency.p50_delta_ms == (
-        report.candidate_latency.p50_ms
-        - report.reference_latency.p50_ms
-    )
-    assert latency.p95_delta_ms == (
-        report.candidate_latency.p95_ms
-        - report.reference_latency.p95_ms
-    )
+    assert report.economic_evidence is None
 
 def build_cost(amount: float) -> CostEstimate:
     """Create controlled development cost evidence."""
@@ -212,6 +191,9 @@ def test_benchmark_report_can_include_cost_evidence() -> None:
     assert cost is not None
     assert cost.delta_per_case == pytest.approx(-0.08)
     assert cost.relative_delta == pytest.approx(-0.8)
+    assert report.reference_latency is None
+    assert report.candidate_latency is not None
+    assert report.economic_evidence.latency is None
 
 
 def test_cheaper_candidate_cannot_override_reject() -> None:

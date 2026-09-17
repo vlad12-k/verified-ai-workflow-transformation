@@ -27,7 +27,6 @@ from vait.economics.metrics import (
     CostEstimate,
     EconomicEvidence,
     compare_cost_estimates,
-    compare_latency_summaries,
 )
 from vait.runners.base import ImplementationRunner
 from vait.verification.bounded import verify_bounded
@@ -119,10 +118,6 @@ def verify_benchmark_bounded(
         cases=cases,
     )
 
-    reference_latency = summarize_latencies(
-        observation.latency_ms
-        for observation in result.reference_observations
-    )
     candidate_latency = summarize_latencies(
         observation.latency_ms
         for observation in result.candidate_observations
@@ -146,25 +141,7 @@ def verify_benchmark_bounded(
         else None
     )
 
-    latency_comparison = (
-        compare_latency_summaries(
-            reference=reference_latency,
-            candidate=candidate_latency,
-        )
-        if (
-            reference_latency is not None
-            and candidate_latency is not None
-        )
-        else None
-    )
-
-    notes = [
-        (
-            "Latency evidence compares the benchmark gold runner "
-            "with the supplied candidate in the current execution "
-            "environment."
-        )
-    ]
+    notes: list[str] = []
 
     if cost_comparison is not None:
         notes.append(
@@ -172,17 +149,19 @@ def verify_benchmark_bounded(
             "behavioural verification decision and cannot "
             "override a rejected candidate."
         )
+        notes.append(
+            "Candidate latency is measured in the current execution "
+            "environment. Comparative reference latency is unavailable "
+            "because benchmark gold labels are not a timed reference "
+            "implementation."
+        )
 
     economic_evidence = (
         EconomicEvidence(
             cost=cost_comparison,
-            latency=latency_comparison,
             notes=notes,
         )
-        if (
-            cost_comparison is not None
-            or latency_comparison is not None
-        )
+        if cost_comparison is not None
         else None
     )
 
@@ -193,7 +172,7 @@ def verify_benchmark_bounded(
         cases_evaluated=len(cases),
         decision=result.decision,
         statistical_evidence=result.statistical_evidence,
-        reference_latency=reference_latency,
+        reference_latency=None,
         candidate_latency=candidate_latency,
         economic_evidence=economic_evidence,
         provenance=build_experiment_provenance(
