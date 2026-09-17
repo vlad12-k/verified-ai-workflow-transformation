@@ -41,8 +41,23 @@ jobs:
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
+      - name: Install CPU PyTorch
+        run: >
+          python -m pip install
+          --index-url https://download.pytorch.org/whl/cpu
+          --extra-index-url https://pypi.org/simple
+          "torch==2.14.0+cpu"
+
       - name: Install project
-        run: python -m pip install -e ".[dev,ml,torch,tensorflow,embeddings,slm,peft]"
+        run: python -m pip install -e ".[dev,ml,tensorflow,embeddings,slm,peft]"
+
+      - name: Verify CPU PyTorch
+        run: >
+          python -c
+          "import torch;
+          print('torch:', torch.__version__);
+          print('cuda:', torch.version.cuda);
+          assert torch.version.cuda is None"
 
       - name: Ruff
         run: ruff check .
