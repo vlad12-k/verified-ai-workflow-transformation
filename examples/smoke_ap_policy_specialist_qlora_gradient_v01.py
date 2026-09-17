@@ -1,5 +1,8 @@
 """Smoke-test one real QLoRA backward pass on pinned local Qwen."""
 
+import json
+from pathlib import Path
+
 import bitsandbytes as bnb
 import torch
 from peft import (
@@ -41,6 +44,11 @@ LORA_ALPHA = 16
 LORA_DROPOUT = 0.05
 
 MAX_LENGTH = 512
+
+OUTPUT_PATH = Path(
+    "artifacts/benchmarks/"
+    "ap-policy-specialist-qlora-feasibility-v0.1.json"
+)
 
 
 if not torch.backends.mps.is_available():
@@ -218,6 +226,116 @@ if frozen_with_gradient:
         "unexpectedly received gradients."
     )
 
+quantized_memory_bytes = int(
+    model.get_memory_footprint()
+)
+
+quantized_memory_mib = (
+    quantized_memory_bytes / 1024**2
+)
+
+report = {
+    "artifact_id": (
+        "ap-policy-specialist-qlora-feasibility-v0.1"
+    ),
+    "development_evidence": True,
+    "model": {
+        "model_id": MODEL_ID,
+        "model_revision": MODEL_REVISION,
+        "device": DEVICE,
+    },
+    "quantization": {
+        "method": "nf4",
+        "load_in_4bit": True,
+        "double_quantization": True,
+        "compute_dtype": "float16",
+        "linear4bit_module_count": len(
+            linear4bit_modules
+        ),
+        "memory_footprint_bytes": (
+            quantized_memory_bytes
+        ),
+        "memory_footprint_mib": (
+            quantized_memory_mib
+        ),
+    },
+    "lora": {
+        "rank": LORA_R,
+        "alpha": LORA_ALPHA,
+        "dropout": LORA_DROPOUT,
+        "target_modules": list(
+            TARGET_MODULES
+        ),
+        "trainable_parameters": (
+            trainable_count
+        ),
+    },
+    "sample": {
+        "example_id": example.example_id,
+        "sequence_tokens": (
+            sample.token_count
+        ),
+        "supervised_tokens": (
+            sample.supervised_token_count
+        ),
+        "max_length": MAX_LENGTH,
+    },
+    "gradient_evidence": {
+        "loss": float(
+            loss.item()
+        ),
+        "trainable_tensors_with_gradients": (
+            len(
+                trainable_with_gradient
+            )
+        ),
+        "trainable_tensors_with_nonzero_gradients": (
+            len(
+                trainable_with_nonzero_gradient
+            )
+        ),
+        "frozen_tensors_with_gradients": (
+            len(
+                frozen_with_gradient
+            )
+        ),
+    },
+    "checks": {
+        "nf4_load": True,
+        "kbit_preparation": True,
+        "forward_pass": True,
+        "backward_pass": True,
+        "qlora_gradients": True,
+        "frozen_quantized_base": True,
+    },
+    "software": {
+        "torch": torch.__version__,
+        "bitsandbytes": bnb.__version__,
+    },
+    "scope": (
+        "Development feasibility evidence from one local "
+        "QLoRA forward/backward pass. Memory footprint is "
+        "the model-reported footprint, not peak end-to-end "
+        "training memory. This does not establish model "
+        "quality, unseen generalisation, or production safety."
+    ),
+}
+
+OUTPUT_PATH.parent.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+OUTPUT_PATH.write_text(
+    json.dumps(
+        report,
+        indent=2,
+        sort_keys=True,
+    )
+    + "\n",
+    encoding="utf-8",
+)
+
 print("AP specialist QLoRA gradient smoke")
 print()
 print(f"Model: {MODEL_ID}@{MODEL_REVISION}")
@@ -226,7 +344,7 @@ print(f"bitsandbytes: {bnb.__version__}")
 print(f"4-bit modules: {len(linear4bit_modules)}")
 print(
     "Quantized memory footprint:",
-    f"{model.get_memory_footprint() / 1024**2:.2f} MiB",
+    f"{quantized_memory_mib:.2f} MiB",
 )
 print(f"Example: {example.example_id}")
 print(f"Sequence tokens: {sample.token_count}")
@@ -265,3 +383,8 @@ print("Forward pass: PASS")
 print("Backward pass: PASS")
 print("QLoRA gradients: PASS")
 print("Frozen quantized base: PASS")
+print()
+print(
+    "Evidence report:",
+    OUTPUT_PATH,
+)
