@@ -1,0 +1,55 @@
+{
+  "benchmark_id": "ap-policy-rag",
+  "benchmark_version": "0.1",
+  "experiment_id": "ap-policy-rag-qwen-lora-v0.1",
+  "annotations": [
+    {
+      "case_id": "duplicate-01",
+      "answer_sha256": "0b4b1ae05e5919e43f9fe1196777d7b67bb9cea1e2649fcff90100b41623af93",
+      "verdict": "SUPPORTED",
+      "rationale": "The answer preserves the mandatory hold-for-investigation requirement before payment approval without weakening or adding material policy semantics."
+    },
+    {
+      "case_id": "bank-01",
+      "answer_sha256": "a000dce049ef906205aa2f2d255479c162f20d7538204a0dcbd59b21e8fcaa20",
+      "verdict": "SUPPORTED",
+      "rationale": "The answer preserves independent verification as a mandatory prerequisite before payment in the context of the supplier bank-account change."
+    },
+    {
+      "case_id": "missing-po-01",
+      "answer_sha256": "b9388435e9ac773fa22d5fa0bf14d42dbd4a117936920426c8386ef22b2b0c9f",
+      "verdict": "PARTIAL",
+      "rationale": "The answer preserves mandatory manual review but omits the material approved-exception qualifier."
+    },
+    {
+      "case_id": "mismatch-01",
+      "answer_sha256": "740acc7e0a4844f406ba365dc4d638c51277f8259c5da13797c4d6ed527861dd",
+      "verdict": "PARTIAL",
+      "rationale": "The answer preserves mandatory review but omits the policy qualifier that large differences may additionally require escalation."
+    },
+    {
+      "case_id": "supplier-01",
+      "answer_sha256": "e9add00f31fe1c63d397a3ae156041e8d85fd04f933260e98b5296aec9f9b647",
+      "verdict": "SUPPORTED",
+      "rationale": "The answer accurately preserves mandatory review before processing for a supplier absent from the approved supplier master."
+    },
+    {
+      "case_id": "tax-01",
+      "answer_sha256": "e24401dbe9782aa81852f2cfa0ae0d8a398e5eddac51d05188815cf19100b7bb",
+      "verdict": "PARTIAL",
+      "rationale": "Invoice review is preserved, but the wording weakens the policy modality from a required review before approval to review that should occur first."
+    },
+    {
+      "case_id": "non-positive-01",
+      "answer_sha256": "473979ac36d43671c7381a92feb07746f78a25a16f66da15acedb35db547654f",
+      "verdict": "PARTIAL",
+      "rationale": "Review is preserved, but should be reviewed weakens the source policy requirement that zero or negative payable amounts require review."
+    },
+    {
+      "case_id": "approval-01",
+      "answer_sha256": "19dfb86c2ac93d802348fa8687d0cd1b657b44f5d366ea2154fab9bcbba91549",
+      "verdict": "PARTIAL",
+      "rationale": "The appropriately senior approver is preserved, but should approve weakens the source policy requirement for authorization."
+    }
+  ]
+}

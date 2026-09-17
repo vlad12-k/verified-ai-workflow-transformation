@@ -50,6 +50,14 @@ slm = [
     "transformers>=5.17,<6.0",
 ]
 
+peft = [
+    "peft>=0.17,<1.0",
+]
+
+qlora = [
+    "bitsandbytes==0.50.2",
+]
+
 [project.scripts]
 vait = "vait.cli:app"
 
