@@ -23,6 +23,10 @@ from vait.contracts.models import (
     VerificationCase,
 )
 from vait.decision.models import Decision, VerificationFailure
+from vait.economics.metrics import (
+    EconomicEvidence,
+    compare_latency_summaries,
+)
 from vait.runners.base import ImplementationRunner
 from vait.verification.bounded import verify_bounded
 from vait.verification.models import StatisticalEvidence
@@ -46,7 +50,11 @@ class BenchmarkVerificationReport(BaseModel):
     decision: Decision
 
     statistical_evidence: StatisticalEvidence | None = None
+
+    reference_latency: LatencySummary | None = None
     candidate_latency: LatencySummary | None = None
+    economic_evidence: EconomicEvidence | None = None
+
     provenance: ExperimentProvenance | None = None
 
     failures: list[VerificationFailure] = Field(default_factory=list)
@@ -107,6 +115,36 @@ def verify_benchmark_bounded(
         cases=cases,
     )
 
+    reference_latency = summarize_latencies(
+        observation.latency_ms
+        for observation in result.reference_observations
+    )
+    candidate_latency = summarize_latencies(
+        observation.latency_ms
+        for observation in result.candidate_observations
+    )
+
+    economic_evidence = (
+        EconomicEvidence(
+            latency=compare_latency_summaries(
+                reference=reference_latency,
+                candidate=candidate_latency,
+            ),
+            notes=[
+                (
+                    "Latency evidence compares the benchmark gold runner "
+                    "with the supplied candidate in the current execution "
+                    "environment."
+                )
+            ],
+        )
+        if (
+            reference_latency is not None
+            and candidate_latency is not None
+        )
+        else None
+    )
+
     return BenchmarkVerificationReport(
         benchmark_id=dataset.benchmark_id,
         benchmark_version=dataset.version,
@@ -114,10 +152,9 @@ def verify_benchmark_bounded(
         cases_evaluated=len(cases),
         decision=result.decision,
         statistical_evidence=result.statistical_evidence,
-        candidate_latency=summarize_latencies(
-            observation.latency_ms
-            for observation in result.candidate_observations
-        ),
+        reference_latency=reference_latency,
+        candidate_latency=candidate_latency,
+        economic_evidence=economic_evidence,
         provenance=build_experiment_provenance(
             dataset=dataset,
             candidate=candidate,

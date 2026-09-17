@@ -144,5 +144,30 @@ def test_bounded_benchmark_report_contains_provenance() -> None:
         "policy_version": "test-v1",
     }
 
+    assert report.reference_latency is not None
+    assert report.reference_latency.count == 4
+
     assert report.candidate_latency is not None
     assert report.candidate_latency.count == 4
+
+    assert report.economic_evidence is not None
+    assert report.economic_evidence.cost is None
+
+    latency = report.economic_evidence.latency
+
+    assert latency is not None
+    assert latency.reference == report.reference_latency
+    assert latency.candidate == report.candidate_latency
+
+    assert latency.mean_delta_ms == (
+        report.candidate_latency.mean_ms
+        - report.reference_latency.mean_ms
+    )
+    assert latency.p50_delta_ms == (
+        report.candidate_latency.p50_ms
+        - report.reference_latency.p50_ms
+    )
+    assert latency.p95_delta_ms == (
+        report.candidate_latency.p95_ms
+        - report.reference_latency.p95_ms
+    )
