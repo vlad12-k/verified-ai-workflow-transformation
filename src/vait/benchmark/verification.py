@@ -24,7 +24,9 @@ from vait.contracts.models import (
 )
 from vait.decision.models import Decision, VerificationFailure
 from vait.economics.metrics import (
+    CostEstimate,
     EconomicEvidence,
+    compare_cost_estimates,
     compare_latency_summaries,
 )
 from vait.runners.base import ImplementationRunner
@@ -66,6 +68,8 @@ def verify_benchmark_bounded(
     policy: BoundedVerificationPolicy,
     allowed_effects: Iterable[Effect] = (Effect.NONE,),
     candidate_configuration: Mapping[str, JsonValue] | None = None,
+    reference_cost: CostEstimate | None = None,
+    candidate_cost: CostEstimate | None = None,
 ) -> BenchmarkVerificationReport:
     """Verify a candidate against benchmark gold labels under a bounded policy."""
     gold_implementation_id = (
@@ -124,23 +128,60 @@ def verify_benchmark_bounded(
         for observation in result.candidate_observations
     )
 
-    economic_evidence = (
-        EconomicEvidence(
-            latency=compare_latency_summaries(
-                reference=reference_latency,
-                candidate=candidate_latency,
-            ),
-            notes=[
-                (
-                    "Latency evidence compares the benchmark gold runner "
-                    "with the supplied candidate in the current execution "
-                    "environment."
-                )
-            ],
+    if (reference_cost is None) != (candidate_cost is None):
+        raise ValueError(
+            "Reference and candidate cost evidence must be "
+            "provided together."
+        )
+
+    cost_comparison = (
+        compare_cost_estimates(
+            reference=reference_cost,
+            candidate=candidate_cost,
+        )
+        if (
+            reference_cost is not None
+            and candidate_cost is not None
+        )
+        else None
+    )
+
+    latency_comparison = (
+        compare_latency_summaries(
+            reference=reference_latency,
+            candidate=candidate_latency,
         )
         if (
             reference_latency is not None
             and candidate_latency is not None
+        )
+        else None
+    )
+
+    notes = [
+        (
+            "Latency evidence compares the benchmark gold runner "
+            "with the supplied candidate in the current execution "
+            "environment."
+        )
+    ]
+
+    if cost_comparison is not None:
+        notes.append(
+            "Cost evidence is reported independently of the "
+            "behavioural verification decision and cannot "
+            "override a rejected candidate."
+        )
+
+    economic_evidence = (
+        EconomicEvidence(
+            cost=cost_comparison,
+            latency=latency_comparison,
+            notes=notes,
+        )
+        if (
+            cost_comparison is not None
+            or latency_comparison is not None
         )
         else None
     )

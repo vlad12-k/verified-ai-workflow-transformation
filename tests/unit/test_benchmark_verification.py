@@ -1,5 +1,6 @@
 """Tests for benchmark-to-verification integration."""
 
+import pytest
 from pydantic import JsonValue
 
 from vait.benchmark.models import BenchmarkCase, BenchmarkDataset
@@ -9,6 +10,10 @@ from vait.contracts.models import (
     RiskLevel,
 )
 from vait.decision.models import Decision, FailureCode
+from vait.economics.metrics import (
+    CostEstimate,
+    CostEvidenceKind,
+)
 from vait.runners.python_runner import PythonImplementationRunner
 
 
@@ -170,4 +175,73 @@ def test_bounded_benchmark_report_contains_provenance() -> None:
     assert latency.p95_delta_ms == (
         report.candidate_latency.p95_ms
         - report.reference_latency.p95_ms
+    )
+
+def build_cost(amount: float) -> CostEstimate:
+    """Create controlled development cost evidence."""
+    return CostEstimate(
+        amount_per_case=amount,
+        currency="USD",
+        evidence_kind=CostEvidenceKind.DECLARED,
+        source="controlled-m2-development-scenario",
+        pricing_version="scenario-v0.1",
+    )
+
+
+def test_benchmark_report_can_include_cost_evidence() -> None:
+    """Cost comparison should be attached without changing verification."""
+    report = verify_benchmark_bounded(
+        dataset=build_dataset(),
+        candidate=build_candidate(),
+        policy=BoundedVerificationPolicy(
+            max_overall_disagreement_rate=0.60,
+            max_high_risk_disagreement_rate=0.80,
+            confidence_level=0.95,
+            min_total_cases=4,
+            min_high_risk_cases=2,
+        ),
+        reference_cost=build_cost(0.10),
+        candidate_cost=build_cost(0.02),
+    )
+
+    assert report.decision is Decision.BOUNDED
+    assert report.economic_evidence is not None
+
+    cost = report.economic_evidence.cost
+
+    assert cost is not None
+    assert cost.delta_per_case == pytest.approx(-0.08)
+    assert cost.relative_delta == pytest.approx(-0.8)
+
+
+def test_cheaper_candidate_cannot_override_reject() -> None:
+    """Economic evidence must not override a behavioural rejection."""
+    report = verify_benchmark_bounded(
+        dataset=build_dataset(
+            high_risk_failure=True,
+        ),
+        candidate=build_candidate(),
+        policy=BoundedVerificationPolicy(
+            max_overall_disagreement_rate=0.90,
+            max_high_risk_disagreement_rate=0.70,
+            confidence_level=0.95,
+            min_total_cases=4,
+            min_high_risk_cases=2,
+        ),
+        reference_cost=build_cost(0.10),
+        candidate_cost=build_cost(0.01),
+    )
+
+    assert report.decision is Decision.REJECT
+    assert report.economic_evidence is not None
+
+    cost = report.economic_evidence.cost
+
+    assert cost is not None
+    assert cost.delta_per_case == pytest.approx(-0.09)
+    assert cost.relative_delta == pytest.approx(-0.9)
+
+    assert any(
+        failure.code is FailureCode.RISK_THRESHOLD_EXCEEDED
+        for failure in report.failures
     )
