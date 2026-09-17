@@ -20,6 +20,38 @@ class InferenceConfiguration(BaseModel):
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class InferenceWorkload(BaseModel):
+    """Identity and scope of one controlled inference workload."""
+
+    workload_id: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    item_count: int = Field(ge=1)
+
+    fingerprint_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class InferenceSetupEvidence(BaseModel):
+    """Timing evidence for candidate preparation outside measured inference."""
+
+    duration_ms: float = Field(
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+
+    scope: str = Field(min_length=1)
+
+    included_operations: list[str] = Field(
+        min_length=1,
+    )
+
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
+
+
 class InferenceLatencySummary(BaseModel):
     """Latency distribution for measured inference observations."""
 
@@ -104,6 +136,9 @@ class InferenceBenchmarkReport(BaseModel):
 
     candidate_implementation_id: str = Field(min_length=1)
     task_family: str = Field(min_length=1)
+
+    workload: InferenceWorkload | None = None
+    setup: InferenceSetupEvidence | None = None
 
     warmup_iterations: int = Field(ge=0)
     measured_iterations: int = Field(ge=1)

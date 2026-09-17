@@ -15,6 +15,8 @@ from vait.inference.models import (
     GenerativeInferenceSample,
     InferenceConfiguration,
     InferenceEnvironment,
+    InferenceSetupEvidence,
+    InferenceWorkload,
 )
 from vait.runners.python_runner import PythonImplementationRunner
 
@@ -326,3 +328,68 @@ def test_controlled_benchmark_rejects_invalid_round_counts(
             warmup_rounds=warmup_rounds,
             measured_rounds=measured_rounds,
         )
+
+
+def test_report_preserves_workload_and_setup_evidence() -> None:
+    """Model-backed benchmarks should separate setup from inference evidence."""
+    workload = InferenceWorkload(
+        workload_id="ap-invoice-exceptions",
+        version="0.2",
+        item_count=20,
+        fingerprint_sha256="a" * 64,
+        metadata={
+            "scope": "development-benchmark",
+        },
+    )
+
+    setup = InferenceSetupEvidence(
+        duration_ms=125.0,
+        scope="candidate-preparation",
+        included_operations=[
+            "training-corpus-build",
+            "model-training",
+            "candidate-preparation",
+        ],
+        metadata={
+            "included_in_inference_latency": False,
+        },
+    )
+
+    report = build_inference_benchmark_report(
+        candidate_implementation_id="model-candidate-v1",
+        task_family="structured-decision",
+        configuration=InferenceConfiguration(
+            provider="local",
+            runtime="pytorch",
+            device="cpu",
+            dtype="float32",
+            batch_size=1,
+            model_id="synthetic-model",
+            model_revision="1.0.0",
+        ),
+        workload=workload,
+        setup=setup,
+        warmup_iterations=2,
+        latency_samples_ms=[1.0, 2.0],
+        throughput=build_throughput_summary(
+            elapsed_seconds=1.0,
+            cases_processed=2,
+            requests_processed=2,
+        ),
+        environment=InferenceEnvironment(
+            python_version="3.12.0",
+            platform="test-platform",
+            system="test-system",
+            machine="test-machine",
+            processor="test-processor",
+        ),
+    )
+
+    assert report.workload is not None
+    assert report.workload.workload_id == "ap-invoice-exceptions"
+    assert report.workload.item_count == 20
+
+    assert report.setup is not None
+    assert report.setup.duration_ms == 125.0
+    assert report.setup.scope == "candidate-preparation"
+    assert report.setup.metadata["included_in_inference_latency"] is False
