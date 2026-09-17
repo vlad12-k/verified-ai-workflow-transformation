@@ -1,0 +1,55 @@
+{
+  "benchmark_id": "ap-policy-rag",
+  "benchmark_version": "0.1",
+  "experiment_id": "ap-policy-rag-qwen-strict-v0.2",
+  "annotations": [
+    {
+      "case_id": "duplicate-01",
+      "answer_sha256": "38de8b3a70b13dcc39ca11700c07273d87ddd4394c6b9c30c326c94cf3536642",
+      "verdict": "PARTIAL",
+      "rationale": "The answer preserves investigation before payment approval, but weakens the policy modality from must be held for investigation to should be investigated."
+    },
+    {
+      "case_id": "bank-01",
+      "answer_sha256": "d81b3b9b05e32799351df0c7d61bf91da653a41a79f0f134bda14c6cbd5243bd",
+      "verdict": "SUPPORTED",
+      "rationale": "The answer preserves the requirement for independent verification before payment is released."
+    },
+    {
+      "case_id": "missing-po-01",
+      "answer_sha256": "568e0d2914e359e74e6339f7daca56d18020480a188e254dee1c95cb85b31050",
+      "verdict": "SUPPORTED",
+      "rationale": "The answer preserves both manual review and the approved-exception qualifier."
+    },
+    {
+      "case_id": "mismatch-01",
+      "answer_sha256": "7a9c4bb367b8cda7037d5d4aa67d17da5bef618233aa8e9ab79aa3a196308f6d",
+      "verdict": "UNSUPPORTED",
+      "rationale": "The answer changes the trigger from any non-zero difference to a significant discrepancy and omits the policy distinction between mandatory review and possible escalation for large differences."
+    },
+    {
+      "case_id": "supplier-01",
+      "answer_sha256": "74d04cd47bb1310d64bba676dcd18fd89aa8c659c36dae5e8b10b12f76edb083",
+      "verdict": "SUPPORTED",
+      "rationale": "The answer accurately preserves review before processing for suppliers absent from the approved supplier master."
+    },
+    {
+      "case_id": "tax-01",
+      "answer_sha256": "e24401dbe9782aa81852f2cfa0ae0d8a398e5eddac51d05188815cf19100b7bb",
+      "verdict": "PARTIAL",
+      "rationale": "Invoice review is supported, but the answer weakens the required review-before-approval condition to should occur first."
+    },
+    {
+      "case_id": "non-positive-01",
+      "answer_sha256": "f582926b4ff07539e664e0f18a97420bcc61041d4889af087aae677328fb09e7",
+      "verdict": "PARTIAL",
+      "rationale": "Review is supported, but accuracy and completeness are introduced as purposes that are not stated in the supplied policy."
+    },
+    {
+      "case_id": "approval-01",
+      "answer_sha256": "28e5234788f89b2c2f26c00ce9d67bf058216c871e376deac508d9a5bd1540bb",
+      "verdict": "PARTIAL",
+      "rationale": "The requirement for an appropriately senior approver is preserved, but additional authority and designated-scope language is not explicitly supported by the supplied policy."
+    }
+  ]
+}

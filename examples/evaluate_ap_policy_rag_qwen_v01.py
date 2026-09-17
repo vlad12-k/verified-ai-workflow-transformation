@@ -12,6 +12,7 @@ from vait.rag.benchmark import (
 from vait.rag.huggingface import HuggingFaceCausalGenerator
 from vait.rag.models import RAGResult
 from vait.rag.pipeline import RetrievalAugmentedGenerator
+from vait.rag.prompt_contracts import RAGPromptContract
 from vait.retrieval.benchmark import load_retrieval_benchmark
 from vait.retrieval.in_memory import InMemoryCosineRetriever
 from vait.retrieval.sentence_transformer import (
@@ -120,6 +121,7 @@ generator = HuggingFaceCausalGenerator(
     minimum_score=MINIMUM_SCORE,
     max_new_tokens=MAX_NEW_TOKENS,
     local_files_only=True,
+    prompt_contract=RAGPromptContract.BASELINE_V1,
 )
 
 pipeline = RetrievalAugmentedGenerator(
@@ -242,6 +244,9 @@ output_path.write_text(
                 ),
                 "do_sample": False,
                 "local_files_only": True,
+                "prompt_contract": (
+                    RAGPromptContract.BASELINE_V1.value
+                ),
             },
             "report": report.model_dump(
                 mode="json"
