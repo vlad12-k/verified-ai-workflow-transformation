@@ -1,7 +1,7 @@
 """Controlled inference benchmark evidence utilities."""
 
 import platform
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
@@ -270,6 +270,98 @@ def run_controlled_inference_benchmark(
         latency_samples_ms=latency_samples_ms,
         throughput=throughput,
         cold_start_latency_ms=cold_start_latency_ms,
+        environment=environment,
+        evidence_metadata=metadata,
+    )
+
+
+
+def run_controlled_generative_benchmark(
+    *,
+    candidate_implementation_id: str,
+    operation: Callable[[], GenerativeInferenceSample],
+    task_family: str,
+    configuration: InferenceConfiguration,
+    warmup_iterations: int,
+    measured_iterations: int,
+    workload: InferenceWorkload | None = None,
+    setup: InferenceSetupEvidence | None = None,
+    environment: InferenceEnvironment | None = None,
+    evidence_metadata: Mapping[str, JsonValue] | None = None,
+) -> InferenceBenchmarkReport:
+    """Execute controlled generative inference measurements."""
+    if warmup_iterations < 0:
+        raise ValueError("Warm-up iterations must be non-negative.")
+
+    if measured_iterations < 1:
+        raise ValueError("At least one measured iteration is required.")
+
+    for _ in range(warmup_iterations):
+        operation()
+
+    samples: list[GenerativeInferenceSample] = []
+    latency_samples_ms: list[float] = []
+
+    measurement_started = perf_counter_ns()
+
+    for _ in range(measured_iterations):
+        started = perf_counter_ns()
+        sample = operation()
+        elapsed_ms = (
+            perf_counter_ns() - started
+        ) / 1_000_000
+
+        samples.append(sample)
+        latency_samples_ms.append(elapsed_ms)
+
+    elapsed_seconds = (
+        perf_counter_ns() - measurement_started
+    ) / 1_000_000_000
+
+    generative = summarize_generative_samples(samples)
+
+    throughput = build_throughput_summary(
+        elapsed_seconds=elapsed_seconds,
+        requests_processed=measured_iterations,
+        output_tokens=generative.output_tokens,
+    )
+
+    ttft_observed_samples = sum(
+        sample.time_to_first_token_ms is not None
+        for sample in samples
+    )
+    generation_latency_observed_samples = sum(
+        sample.generation_latency_ms is not None
+        for sample in samples
+    )
+
+    metadata: dict[str, JsonValue] = dict(
+        evidence_metadata or {}
+    )
+    metadata.update(
+        {
+            "measurement_scope": (
+                "generative_operation_wall_clock"
+            ),
+            "ttft_observed_samples": (
+                ttft_observed_samples
+            ),
+            "generation_latency_observed_samples": (
+                generation_latency_observed_samples
+            ),
+        }
+    )
+
+    return build_inference_benchmark_report(
+        candidate_implementation_id=candidate_implementation_id,
+        task_family=task_family,
+        configuration=configuration,
+        workload=workload,
+        setup=setup,
+        warmup_iterations=warmup_iterations,
+        latency_samples_ms=latency_samples_ms,
+        throughput=throughput,
+        generative=generative,
         environment=environment,
         evidence_metadata=metadata,
     )

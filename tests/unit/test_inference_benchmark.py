@@ -7,6 +7,7 @@ from vait.inference.benchmark import (
     build_inference_benchmark_report,
     build_throughput_summary,
     capture_inference_environment,
+    run_controlled_generative_benchmark,
     run_controlled_inference_benchmark,
     summarize_generative_samples,
     summarize_inference_latencies,
@@ -393,3 +394,102 @@ def test_report_preserves_workload_and_setup_evidence() -> None:
     assert report.setup.duration_ms == 125.0
     assert report.setup.scope == "candidate-preparation"
     assert report.setup.metadata["included_in_inference_latency"] is False
+
+
+def test_controlled_generative_benchmark_tracks_usage_and_throughput() -> None:
+    """Generative measurements should preserve token and timing evidence."""
+    calls: list[int] = []
+
+    def operation() -> GenerativeInferenceSample:
+        calls.append(1)
+
+        return GenerativeInferenceSample(
+            time_to_first_token_ms=None,
+            generation_latency_ms=8.0,
+            input_tokens=10,
+            output_tokens=4,
+        )
+
+    report = run_controlled_generative_benchmark(
+        candidate_implementation_id="local-generator-v1",
+        operation=operation,
+        task_family="grounded-generation",
+        configuration=InferenceConfiguration(
+            provider="local",
+            runtime="huggingface",
+            device="cpu",
+            dtype="float32",
+            batch_size=1,
+            model_id="test-generator",
+            model_revision="revision-1",
+        ),
+        warmup_iterations=2,
+        measured_iterations=3,
+    )
+
+    assert len(calls) == 5
+    assert report.warmup_iterations == 2
+    assert report.measured_iterations == 3
+    assert report.latency.count == 3
+
+    assert report.generative is not None
+    assert report.generative.sample_count == 3
+    assert report.generative.input_tokens == 30
+    assert report.generative.output_tokens == 12
+    assert report.generative.time_to_first_token is None
+    assert report.generative.generation_latency is not None
+    assert report.generative.generation_latency.p50_ms == 8.0
+
+    assert report.throughput.cases_per_second is None
+    assert report.throughput.requests_per_second is not None
+    assert report.throughput.requests_per_second > 0.0
+    assert report.throughput.tokens_per_second is not None
+    assert report.throughput.tokens_per_second > 0.0
+
+    assert (
+        report.evidence_metadata["measurement_scope"]
+        == "generative_operation_wall_clock"
+    )
+    assert report.evidence_metadata["ttft_observed_samples"] == 0
+    assert (
+        report.evidence_metadata[
+            "generation_latency_observed_samples"
+        ]
+        == 3
+    )
+
+
+@pytest.mark.parametrize(
+    ("warmup_iterations", "measured_iterations"),
+    [
+        (-1, 1),
+        (0, 0),
+    ],
+)
+def test_controlled_generative_benchmark_rejects_invalid_iterations(
+    warmup_iterations: int,
+    measured_iterations: int,
+) -> None:
+    """Invalid generative measurement plans should fail immediately."""
+
+    def operation() -> GenerativeInferenceSample:
+        return GenerativeInferenceSample(
+            input_tokens=1,
+            output_tokens=1,
+        )
+
+    with pytest.raises(ValueError):
+        run_controlled_generative_benchmark(
+            candidate_implementation_id="generator-v1",
+            operation=operation,
+            task_family="grounded-generation",
+            configuration=InferenceConfiguration(
+                provider="local",
+                runtime="test",
+                device="cpu",
+                dtype="float32",
+                batch_size=1,
+            ),
+            warmup_iterations=warmup_iterations,
+            measured_iterations=measured_iterations,
+        )

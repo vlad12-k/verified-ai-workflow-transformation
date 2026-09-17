@@ -330,3 +330,69 @@ def test_generator_exposes_versioned_prompt_contract(
         "prompt-contract=strict-v2"
         in generator.implementation_id
     )
+
+
+def test_generator_exposes_exact_usage_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Measured generation should expose exact prompt and output token counts."""
+    tokenizer = FakeTokenizer()
+    model = FakeModel()
+
+    patch_model_loading(
+        monkeypatch,
+        tokenizer=tokenizer,
+        model=model,
+    )
+
+    generator = HuggingFaceCausalGenerator(
+        model_id="example/model",
+        revision="abc123",
+        minimum_score=0.4,
+        max_new_tokens=64,
+    )
+
+    evidence = generator.generate_with_evidence(
+        build_request()
+    )
+
+    assert evidence.generation.answer == (
+        "Hold the invoice for investigation."
+    )
+    assert evidence.generation.abstained is False
+
+    assert evidence.input_tokens == 3
+    assert evidence.output_tokens == 2
+    assert evidence.model_generation_latency_ms >= 0.0
+
+
+def test_generator_usage_evidence_preserves_pre_generation_abstention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Weak evidence should report zero model usage when generation is skipped."""
+    tokenizer = FakeTokenizer()
+    model = FakeModel()
+
+    patch_model_loading(
+        monkeypatch,
+        tokenizer=tokenizer,
+        model=model,
+    )
+
+    generator = HuggingFaceCausalGenerator(
+        model_id="example/model",
+        revision="abc123",
+        minimum_score=0.4,
+    )
+
+    evidence = generator.generate_with_evidence(
+        build_request(
+            score=0.3,
+        )
+    )
+
+    assert evidence.generation.abstained is True
+    assert evidence.input_tokens == 0
+    assert evidence.output_tokens == 0
+    assert evidence.model_generation_latency_ms == 0.0
+    assert model.generate_kwargs is None
