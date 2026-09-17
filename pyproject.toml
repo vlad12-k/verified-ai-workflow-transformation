@@ -33,6 +33,35 @@ dev = [
     "scipy-stubs"
 ]
 
+ml = [
+    "scikit-learn>=1.5,<2.0",
+    "xgboost>=2.1,<4.0",
+]
+
+torch = [
+    "torch>=2.5,<3.0",
+]
+
+tensorflow = [
+    "tensorflow==2.21.0",
+]
+
+embeddings = [
+    "sentence-transformers>=6.0,<7.0",
+]
+
+slm = [
+    "transformers>=5.17,<6.0",
+]
+
+peft = [
+    "peft>=0.17,<1.0",
+]
+
+qlora = [
+    "bitsandbytes==0.50.2",
+]
+
 [project.scripts]
 vait = "vait.cli:app"
 
@@ -65,3 +94,12 @@ branch = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
+
+[[tool.mypy.overrides]]
+module = [
+    "sklearn.*",
+    "xgboost.*",
+    "sentence_transformers.*",
+    "keras.*",
+]
+ignore_missing_imports = true

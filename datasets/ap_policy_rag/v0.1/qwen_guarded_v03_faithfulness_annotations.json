@@ -1,0 +1,55 @@
+{
+  "benchmark_id": "ap-policy-rag",
+  "benchmark_version": "0.1",
+  "experiment_id": "ap-policy-rag-qwen-strict-guarded-v0.3",
+  "annotations": [
+    {
+      "case_id": "duplicate-01",
+      "answer_sha256": "c3789cd26d34e7dc436ed337c70bde30f090d95ae366173209afd9f23b517140",
+      "verdict": "SUPPORTED",
+      "rationale": "The surfaced answer is the retrieved policy evidence itself and preserves the mandatory investigation requirement before approval."
+    },
+    {
+      "case_id": "bank-01",
+      "answer_sha256": "d81b3b9b05e32799351df0c7d61bf91da653a41a79f0f134bda14c6cbd5243bd",
+      "verdict": "SUPPORTED",
+      "rationale": "The surfaced primary answer preserves independent verification before supplier payment after a bank-account change."
+    },
+    {
+      "case_id": "missing-po-01",
+      "answer_sha256": "d6a345301792081d295bd4632b3bec86a03add181f273ced6aab27fa5485686f",
+      "verdict": "SUPPORTED",
+      "rationale": "The surfaced answer is the retrieved policy evidence itself and preserves manual review and the approved-exception qualifier."
+    },
+    {
+      "case_id": "mismatch-01",
+      "answer_sha256": "e4f2be94118c74dde6741662ca1d4d1569c5d959bee2e93a2b70e786162cd118",
+      "verdict": "SUPPORTED",
+      "rationale": "The surfaced answer is the retrieved policy evidence itself and preserves the non-zero review trigger and conditional escalation."
+    },
+    {
+      "case_id": "supplier-01",
+      "answer_sha256": "74d04cd47bb1310d64bba676dcd18fd89aa8c659c36dae5e8b10b12f76edb083",
+      "verdict": "SUPPORTED",
+      "rationale": "The surfaced primary answer preserves mandatory review before processing for vendors outside the approved supplier master."
+    },
+    {
+      "case_id": "tax-01",
+      "answer_sha256": "f725b648e647f221062806e1ea1623b4e4d659ac5e3e8039882b2853af46b705",
+      "verdict": "SUPPORTED",
+      "rationale": "The surfaced answer is the retrieved policy evidence itself and preserves review before approval."
+    },
+    {
+      "case_id": "non-positive-01",
+      "answer_sha256": "2518c17762e1290a79bf0f25addd4f2c41641ac46792cd5660c2b313eb0b47af",
+      "verdict": "SUPPORTED",
+      "rationale": "The surfaced answer is the retrieved policy evidence itself, so the rationale shown to the user comes from supplied evidence."
+    },
+    {
+      "case_id": "approval-01",
+      "answer_sha256": "321d74e5bfc43cf18dc624c949110ff7a92f4c6a0922b89b103e545c2dfd4232",
+      "verdict": "SUPPORTED",
+      "rationale": "The surfaced answer is the retrieved policy evidence itself and preserves authorization by an appropriately senior approver."
+    }
+  ]
+}

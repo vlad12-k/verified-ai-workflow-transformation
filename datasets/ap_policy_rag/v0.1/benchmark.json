@@ -1,0 +1,93 @@
+{
+  "benchmark_id": "ap-policy-rag",
+  "version": "0.1",
+  "description": "Development benchmark for grounded AP policy RAG and abstention behaviour.",
+  "source_retrieval_benchmark_id": "ap-policy-context",
+  "source_retrieval_benchmark_version": "0.1",
+  "cases": [
+    {
+      "case_id": "duplicate-01",
+      "query": "What should happen if the same supplier invoice appears twice?",
+      "relevant_document_ids": ["duplicate-invoice-policy"],
+      "expected_abstain": false
+    },
+    {
+      "case_id": "bank-01",
+      "query": "What must happen before paying a supplier after its bank account changes?",
+      "relevant_document_ids": ["bank-change-policy"],
+      "expected_abstain": false
+    },
+    {
+      "case_id": "missing-po-01",
+      "query": "How should an invoice with no purchase order reference be handled?",
+      "relevant_document_ids": ["missing-po-policy"],
+      "expected_abstain": false
+    },
+    {
+      "case_id": "mismatch-01",
+      "query": "What should happen when the invoice amount differs from the purchase order?",
+      "relevant_document_ids": ["amount-mismatch-policy"],
+      "expected_abstain": false
+    },
+    {
+      "case_id": "supplier-01",
+      "query": "What if the vendor is not in the approved supplier master?",
+      "relevant_document_ids": ["unknown-supplier-policy"],
+      "expected_abstain": false
+    },
+    {
+      "case_id": "tax-01",
+      "query": "What should happen when a supplier tax identifier cannot be validated?",
+      "relevant_document_ids": ["tax-id-policy"],
+      "expected_abstain": false
+    },
+    {
+      "case_id": "non-positive-01",
+      "query": "How should a zero-value or negative invoice be handled?",
+      "relevant_document_ids": ["non-positive-invoice-policy"],
+      "expected_abstain": false
+    },
+    {
+      "case_id": "approval-01",
+      "query": "Who should approve an invoice that exceeds the normal delegated limit?",
+      "relevant_document_ids": ["approval-threshold-policy"],
+      "expected_abstain": false
+    },
+    {
+      "case_id": "ood-leave",
+      "query": "How many days of annual leave can an employee carry into next year?",
+      "relevant_document_ids": [],
+      "expected_abstain": true
+    },
+    {
+      "case_id": "ood-recruitment",
+      "query": "How long is the probation period for a newly hired employee?",
+      "relevant_document_ids": [],
+      "expected_abstain": true
+    },
+    {
+      "case_id": "ood-travel",
+      "query": "Which hotels may employees book for international business travel?",
+      "relevant_document_ids": [],
+      "expected_abstain": true
+    },
+    {
+      "case_id": "ood-marketing",
+      "query": "Who approves the quarterly social media advertising budget?",
+      "relevant_document_ids": [],
+      "expected_abstain": true
+    },
+    {
+      "case_id": "ood-warehouse",
+      "query": "How often should physical warehouse inventory be counted?",
+      "relevant_document_ids": [],
+      "expected_abstain": true
+    },
+    {
+      "case_id": "ood-equipment",
+      "query": "What is the replacement cycle for employee laptops and monitors?",
+      "relevant_document_ids": [],
+      "expected_abstain": true
+    }
+  ]
+}

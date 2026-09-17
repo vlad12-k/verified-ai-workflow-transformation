@@ -1,0 +1,144 @@
+{
+  "benchmark_id": "ap-policy-context",
+  "version": "0.1",
+  "description": "Synthetic enterprise policy retrieval benchmark for AP exception workflows.",
+  "documents": [
+    {
+      "document_id": "duplicate-invoice-policy",
+      "text": "Potential duplicate supplier invoices must be held for investigation before payment is approved.",
+      "metadata": {"topic": "duplicate-invoice"}
+    },
+    {
+      "document_id": "bank-change-policy",
+      "text": "A supplier bank account change requires independent verification before any payment is released.",
+      "metadata": {"topic": "bank-details"}
+    },
+    {
+      "document_id": "missing-po-policy",
+      "text": "Invoices without a purchase order reference require manual review unless an approved exception applies.",
+      "metadata": {"topic": "missing-purchase-order"}
+    },
+    {
+      "document_id": "amount-mismatch-policy",
+      "text": "Any non-zero difference between the invoice amount and purchase order amount requires review. Large differences may require escalation.",
+      "metadata": {"topic": "amount-mismatch"}
+    },
+    {
+      "document_id": "unknown-supplier-policy",
+      "text": "Invoices received from suppliers that are not present in the approved supplier master must be reviewed before processing.",
+      "metadata": {"topic": "unknown-supplier"}
+    },
+    {
+      "document_id": "tax-id-policy",
+      "text": "An invalid or unverifiable supplier tax identifier requires invoice review before approval.",
+      "metadata": {"topic": "tax-identifier"}
+    },
+    {
+      "document_id": "non-positive-invoice-policy",
+      "text": "Invoices with zero or negative payable amounts require review because they may represent credits, corrections, or invalid transactions.",
+      "metadata": {"topic": "non-positive-amount"}
+    },
+    {
+      "document_id": "inconsistent-po-policy",
+      "text": "If a purchase order is marked as present but its expected amount is unavailable, the record is inconsistent and requires review.",
+      "metadata": {"topic": "inconsistent-purchase-order"}
+    },
+    {
+      "document_id": "approval-threshold-policy",
+      "text": "Invoices above the delegated approval threshold require authorization from an appropriately senior approver.",
+      "metadata": {"topic": "approval-threshold"}
+    },
+    {
+      "document_id": "payment-terms-policy",
+      "text": "Approved supplier invoices should be scheduled according to the contractual payment terms recorded for the supplier.",
+      "metadata": {"topic": "payment-terms"}
+    },
+    {
+      "document_id": "password-policy",
+      "text": "Employees must protect account credentials and follow the organization's password security requirements.",
+      "metadata": {"topic": "security-passwords"}
+    },
+    {
+      "document_id": "access-control-policy",
+      "text": "System access must follow least-privilege principles and be limited to authorized personnel.",
+      "metadata": {"topic": "security-access-control"}
+    }
+  ],
+  "queries": [
+    {
+      "query_id": "duplicate-01",
+      "text": "What should happen if the same supplier invoice appears twice?",
+      "relevant_document_ids": ["duplicate-invoice-policy"]
+    },
+    {
+      "query_id": "duplicate-02",
+      "text": "How should repeated billing records from a vendor be handled?",
+      "relevant_document_ids": ["duplicate-invoice-policy"]
+    },
+    {
+      "query_id": "bank-01",
+      "text": "The supplier wants payment sent to a newly changed bank account.",
+      "relevant_document_ids": ["bank-change-policy"]
+    },
+    {
+      "query_id": "bank-02",
+      "text": "What verification is needed after a vendor changes its payout account?",
+      "relevant_document_ids": ["bank-change-policy"]
+    },
+    {
+      "query_id": "missing-po-01",
+      "text": "An invoice arrived without any purchase order reference.",
+      "relevant_document_ids": ["missing-po-policy"]
+    },
+    {
+      "query_id": "mismatch-01",
+      "text": "The invoice total does not equal the purchase order amount.",
+      "relevant_document_ids": ["amount-mismatch-policy"]
+    },
+    {
+      "query_id": "mismatch-02",
+      "text": "What happens when an invoice differs from the PO by only one cent?",
+      "relevant_document_ids": ["amount-mismatch-policy"]
+    },
+    {
+      "query_id": "supplier-01",
+      "text": "The vendor cannot be found in the approved supplier master.",
+      "relevant_document_ids": ["unknown-supplier-policy"]
+    },
+    {
+      "query_id": "tax-01",
+      "text": "The supplier VAT or tax registration number cannot be validated.",
+      "relevant_document_ids": ["tax-id-policy"]
+    },
+    {
+      "query_id": "amount-01",
+      "text": "How should a zero-value or negative invoice be treated?",
+      "relevant_document_ids": ["non-positive-invoice-policy"]
+    },
+    {
+      "query_id": "po-state-01",
+      "text": "The system says a PO exists but there is no expected PO amount.",
+      "relevant_document_ids": ["inconsistent-po-policy"]
+    },
+    {
+      "query_id": "approval-01",
+      "text": "Who must authorize an invoice that exceeds the normal approval limit?",
+      "relevant_document_ids": ["approval-threshold-policy"]
+    },
+    {
+      "query_id": "payment-01",
+      "text": "When should an approved supplier invoice be scheduled for payment?",
+      "relevant_document_ids": ["payment-terms-policy"]
+    },
+    {
+      "query_id": "password-01",
+      "text": "What policy governs employee account passwords and credentials?",
+      "relevant_document_ids": ["password-policy"]
+    },
+    {
+      "query_id": "access-01",
+      "text": "Which policy says users should receive only the access they need?",
+      "relevant_document_ids": ["access-control-policy"]
+    }
+  ]
+}

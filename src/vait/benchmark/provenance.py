@@ -27,6 +27,13 @@ _TRACKED_PACKAGES = (
     "scipy",
     "pandas",
     "PyYAML",
+    "scikit-learn",
+    "xgboost",
+    "torch",
+    "sentence-transformers",
+    "transformers",
+    "huggingface-hub",
+    "tokenizers",
 )
 
 
