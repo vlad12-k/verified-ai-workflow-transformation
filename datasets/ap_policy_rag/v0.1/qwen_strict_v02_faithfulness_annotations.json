@@ -18,8 +18,8 @@
     {
       "case_id": "missing-po-01",
       "answer_sha256": "568e0d2914e359e74e6339f7daca56d18020480a188e254dee1c95cb85b31050",
-      "verdict": "SUPPORTED",
-      "rationale": "The answer preserves both manual review and the approved-exception qualifier."
+      "verdict": "PARTIAL",
+      "rationale": "The answer preserves manual review and the approved-exception qualifier, but weakens the policy modality from requires manual review to should be reviewed."
     },
     {
       "case_id": "mismatch-01",
