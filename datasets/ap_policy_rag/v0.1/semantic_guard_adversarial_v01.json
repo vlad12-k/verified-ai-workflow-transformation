@@ -1,0 +1,91 @@
+{
+  "benchmark_id": "ap-policy-rag-semantic-guard-adversarial",
+  "version": "0.1",
+  "description": "Development stress cases for deterministic semantic-drift detection.",
+  "cases": [
+    {
+      "case_id": "safe-hard-obligation-paraphrase",
+      "context": "Unknown suppliers require review before processing.",
+      "answer": "Unknown suppliers must be reviewed before processing.",
+      "expected_flag": false,
+      "rationale": "Equivalent hard obligation and temporal condition."
+    },
+    {
+      "case_id": "safe-before-after-equivalence",
+      "context": "Payment must not be released before independent verification is complete.",
+      "answer": "Payment may be released only after independent verification is complete.",
+      "expected_flag": false,
+      "rationale": "Before and only-after forms express the same ordering constraint."
+    },
+    {
+      "case_id": "safe-unless-except-equivalence",
+      "context": "Invoices require manual review unless an approved exception applies.",
+      "answer": "Invoices require manual review except when an approved exception applies.",
+      "expected_flag": false,
+      "rationale": "Unless and except-when preserve the same exception."
+    },
+    {
+      "case_id": "safe-may-can-equivalence",
+      "context": "Large differences may require escalation.",
+      "answer": "Large differences can require escalation.",
+      "expected_flag": false,
+      "rationale": "May and can preserve non-mandatory escalation modality."
+    },
+    {
+      "case_id": "safe-nonzero-equivalence",
+      "context": "Any non-zero difference requires review.",
+      "answer": "Every difference other than zero requires review.",
+      "expected_flag": false,
+      "rationale": "Non-zero and other-than-zero express the same scope."
+    },
+    {
+      "case_id": "safe-before-prior-equivalence",
+      "context": "Independent verification is required before payment.",
+      "answer": "Independent verification is required prior to payment.",
+      "expected_flag": false,
+      "rationale": "Before and prior-to express the same temporal constraint."
+    },
+    {
+      "case_id": "risky-must-to-should",
+      "context": "Duplicate invoices must be held before approval.",
+      "answer": "Duplicate invoices should be held before approval.",
+      "expected_flag": true,
+      "rationale": "A mandatory obligation is weakened."
+    },
+    {
+      "case_id": "risky-unless-dropped",
+      "context": "Invoices require review unless an approved exception applies.",
+      "answer": "Invoices require review.",
+      "expected_flag": true,
+      "rationale": "A material exception is removed."
+    },
+    {
+      "case_id": "risky-nonzero-to-significant",
+      "context": "Any non-zero difference requires review.",
+      "answer": "Significant differences require review.",
+      "expected_flag": true,
+      "rationale": "The policy trigger is narrowed from any non-zero difference."
+    },
+    {
+      "case_id": "risky-may-to-must",
+      "context": "Large differences may require escalation.",
+      "answer": "Large differences must be escalated.",
+      "expected_flag": true,
+      "rationale": "A conditional possibility is strengthened into an obligation."
+    },
+    {
+      "case_id": "risky-any-to-major",
+      "context": "Any supplier bank account change requires independent verification.",
+      "answer": "Major supplier bank account changes require independent verification.",
+      "expected_flag": true,
+      "rationale": "Universal scope is narrowed to major changes."
+    },
+    {
+      "case_id": "risky-unsupported-rationale",
+      "context": "Zero-value invoices require review.",
+      "answer": "Zero-value invoices require review because they are fraudulent.",
+      "expected_flag": true,
+      "rationale": "The answer adds an unsupported fraud claim."
+    }
+  ]
+}
