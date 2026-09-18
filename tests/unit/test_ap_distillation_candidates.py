@@ -40,6 +40,13 @@ def test_builds_two_distillation_candidates() -> None:
         == "knowledge_distillation"
     )
 
+    assert hard.configuration["parameter_count"] > 0
+    assert distilled.configuration["parameter_count"] > 0
+    assert (
+        hard.configuration["parameter_count"]
+        == distilled.configuration["parameter_count"]
+    )
+
 
 def test_distillation_candidates_are_applicable() -> None:
     """Compact students should support the AP benchmark context."""

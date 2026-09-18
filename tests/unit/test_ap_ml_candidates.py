@@ -123,3 +123,90 @@ def test_ml_candidate_requires_training_capabilities(
     assert preparation.ready is False
     assert preparation.runner is None
     assert preparation.applicability.is_applicable is False
+
+
+@pytest.mark.parametrize(
+    "builder",
+    [
+        pytest.param(
+            "random_forest",
+            id="random-forest",
+        ),
+        pytest.param(
+            "xgboost",
+            id="xgboost",
+        ),
+    ],
+)
+def test_ml_native_batch_matches_scalar_predictions(
+    builder,
+    training_corpus,
+) -> None:
+    """Vectorised ML inference must preserve scalar candidate behaviour."""
+    from vait.transformations.library.ap_ml import (
+        build_random_forest_native_batch_candidate,
+        build_xgboost_native_batch_candidate,
+    )
+
+    native_builder = (
+        build_random_forest_native_batch_candidate
+        if builder == "random_forest"
+        else build_xgboost_native_batch_candidate
+    )
+
+    transformation, predict_batch = (
+        native_builder(
+            training_corpus
+        )
+    )
+
+    preparation = (
+        transformation.prepare_candidate(
+            ApplicabilityContext(
+                risk_level=RiskLevel.HIGH,
+                available_capabilities=frozenset(
+                    {
+                        "typed-inputs",
+                        "tabular-features",
+                        "trained-model",
+                    }
+                ),
+            )
+        )
+    )
+
+    assert preparation.runner is not None
+
+    cases = tuple(
+        VerificationCase(
+            id=case.case_id,
+            input_data=case.input_data,
+            risk_level=RiskLevel.LOW,
+        )
+        for case in training_corpus.cases[
+            :8
+        ]
+    )
+
+    batch_outputs = predict_batch(
+        tuple(
+            case.input_data
+            for case in cases
+        )
+    )
+
+    scalar_outputs = tuple(
+        preparation.runner.execute(
+            case
+        ).output
+        for case in cases
+    )
+
+    assert len(
+        batch_outputs
+    ) == len(cases)
+
+    assert (
+        batch_outputs
+        == scalar_outputs
+    )

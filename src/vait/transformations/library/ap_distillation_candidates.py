@@ -1,7 +1,8 @@
 """VAIT candidate wrappers for AP knowledge-distillation students."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
+import numpy as np
 import torch
 from pydantic import JsonValue
 
@@ -10,6 +11,7 @@ from vait.transformations.library.ap_distillation import (
     APDistillationStudent,
     train_distilled_student,
     train_hard_label_student,
+    trainable_parameter_count,
 )
 from vait.transformations.library.ap_tabular import (
     AP_TABULAR_FEATURE_NAMES,
@@ -123,6 +125,9 @@ def build_ap_distillation_transformations(
             "hidden_dimensions": [8],
             "training_epochs": hard_result.epochs,
             "learning_rate": hard_result.learning_rate,
+            "parameter_count": trainable_parameter_count(
+                hard_result.model
+            ),
             "final_training_loss": hard_result.final_loss,
         },
     )
@@ -159,6 +164,9 @@ def build_ap_distillation_transformations(
             "training_epochs": distilled_result.epochs,
             "learning_rate": (
                 distilled_result.learning_rate
+            ),
+            "parameter_count": trainable_parameter_count(
+                distilled_result.model
             ),
             "temperature": (
                 distilled_result.temperature
@@ -256,3 +264,291 @@ def _prediction_function(
         }
 
     return predict
+
+
+def build_ap_distillation_native_batch_candidates(
+    corpus: APTrainingCorpus,
+) -> tuple[
+    tuple[
+        PythonCallableTransformation,
+        Callable[
+            [Sequence[dict[str, JsonValue]]],
+            tuple[JsonValue, ...],
+        ],
+    ],
+    tuple[
+        PythonCallableTransformation,
+        Callable[
+            [Sequence[dict[str, JsonValue]]],
+            tuple[JsonValue, ...],
+        ],
+    ],
+]:
+    """Build hard-label and distilled students with native batch paths."""
+    features_array, labels_array = (
+        _training_arrays(
+            corpus
+        )
+    )
+
+    features = torch.from_numpy(
+        features_array
+    )
+
+    labels = torch.from_numpy(
+        labels_array
+    )
+
+    teacher, _ = _train_model(
+        corpus
+    )
+
+    teacher.eval()
+
+    with torch.inference_mode():
+        teacher_logits = teacher(
+            features
+        )
+
+    hard_result = train_hard_label_student(
+        features=features,
+        hard_labels=labels,
+        seed=corpus.seed,
+        epochs=_STUDENT_EPOCHS,
+        learning_rate=(
+            _STUDENT_LEARNING_RATE
+        ),
+    )
+
+    distilled_result = (
+        train_distilled_student(
+            features=features,
+            hard_labels=labels,
+            teacher_logits=teacher_logits,
+            seed=corpus.seed,
+            epochs=_STUDENT_EPOCHS,
+            learning_rate=(
+                _STUDENT_LEARNING_RATE
+            ),
+            temperature=(
+                _DISTILLATION_TEMPERATURE
+            ),
+            hard_label_weight=(
+                _HARD_LABEL_WEIGHT
+            ),
+        )
+    )
+
+    hard = PythonCallableTransformation(
+        descriptor=_descriptor(
+            transformation_id=(
+                "synthetic-ap-pytorch-student-hard-label"
+            ),
+            name=(
+                "Synthetic AP compact PyTorch "
+                "hard-label student"
+            ),
+            description=(
+                "Compact PyTorch AP classifier trained "
+                "directly from synthetic hard labels."
+            ),
+        ),
+        implementation_id=(
+            "synthetic-ap-pytorch-student-hard-label-v1"
+        ),
+        function=_prediction_function(
+            hard_result.model
+        ),
+        configuration={
+            "model_family": (
+                "pytorch_mlp_student"
+            ),
+            "training_method": (
+                "hard_labels"
+            ),
+            "training_seed": corpus.seed,
+            "training_cases": len(
+                corpus.cases
+            ),
+            "feature_count": len(
+                AP_TABULAR_FEATURE_NAMES
+            ),
+            "hidden_dimensions": [8],
+            "training_epochs": (
+                hard_result.epochs
+            ),
+            "learning_rate": (
+                hard_result.learning_rate
+            ),
+            "parameter_count": (
+                trainable_parameter_count(
+                    hard_result.model
+                )
+            ),
+            "final_training_loss": (
+                hard_result.final_loss
+            ),
+        },
+    )
+
+    distilled = (
+        PythonCallableTransformation(
+            descriptor=_descriptor(
+                transformation_id=(
+                    "synthetic-ap-pytorch-student-distilled"
+                ),
+                name=(
+                    "Synthetic AP compact PyTorch "
+                    "distilled student"
+                ),
+                description=(
+                    "Compact PyTorch AP classifier trained "
+                    "with teacher soft targets and hard labels."
+                ),
+            ),
+            implementation_id=(
+                "synthetic-ap-pytorch-student-distilled-v1"
+            ),
+            function=_prediction_function(
+                distilled_result.model
+            ),
+            configuration={
+                "model_family": (
+                    "pytorch_mlp_student"
+                ),
+                "training_method": (
+                    "knowledge_distillation"
+                ),
+                "training_seed": (
+                    corpus.seed
+                ),
+                "training_cases": len(
+                    corpus.cases
+                ),
+                "feature_count": len(
+                    AP_TABULAR_FEATURE_NAMES
+                ),
+                "hidden_dimensions": [8],
+                "training_epochs": (
+                    distilled_result.epochs
+                ),
+                "learning_rate": (
+                    distilled_result
+                    .learning_rate
+                ),
+                "parameter_count": (
+                    trainable_parameter_count(
+                        distilled_result.model
+                    )
+                ),
+                "temperature": (
+                    distilled_result.temperature
+                ),
+                "hard_label_weight": (
+                    distilled_result
+                    .hard_label_weight
+                ),
+                "final_training_loss": (
+                    distilled_result.final_loss
+                ),
+            },
+        )
+    )
+
+    return (
+        (
+            hard,
+            _native_batch_prediction_function(
+                hard_result.model
+            ),
+        ),
+        (
+            distilled,
+            _native_batch_prediction_function(
+                distilled_result.model
+            ),
+        ),
+    )
+
+
+def _native_batch_prediction_function(
+    model: APDistillationStudent,
+) -> Callable[
+    [Sequence[dict[str, JsonValue]]],
+    tuple[JsonValue, ...],
+]:
+    """Build genuine vectorised inference for one compact student."""
+
+    def predict_batch(
+        items: Sequence[
+            dict[str, JsonValue]
+        ],
+    ) -> tuple[
+        JsonValue,
+        ...,
+    ]:
+        if not items:
+            return ()
+
+        feature_rows = [
+            _transform_features(
+                extract_ap_tabular_features(
+                    item
+                )
+            )
+            for item in items
+        ]
+
+        tensor = torch.from_numpy(
+            np.asarray(
+                feature_rows,
+                dtype=np.float32,
+            )
+        )
+
+        with torch.inference_mode():
+            logits = model(
+                tensor
+            )
+
+            predictions = (
+                torch.argmax(
+                    logits,
+                    dim=1,
+                )
+                .cpu()
+                .tolist()
+            )
+
+        outputs: list[
+            JsonValue
+        ] = []
+
+        for prediction in predictions:
+            class_index = int(
+                prediction
+            )
+
+            try:
+                decision = (
+                    _INDEX_TO_DECISION[
+                        class_index
+                    ]
+                )
+            except KeyError as exc:
+                raise RuntimeError(
+                    "Unsupported student "
+                    f"class index: {class_index}"
+                ) from exc
+
+            outputs.append(
+                {
+                    "decision": decision,
+                }
+            )
+
+        return tuple(
+            outputs
+        )
+
+    return predict_batch

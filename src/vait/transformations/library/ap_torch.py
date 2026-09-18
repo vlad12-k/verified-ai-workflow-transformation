@@ -1,6 +1,6 @@
 """PyTorch tabular candidate for the synthetic AP benchmark."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import cast
 
 import numpy as np
@@ -124,6 +124,12 @@ def build_pytorch_transformation(
             "training_epochs": _TRAINING_EPOCHS,
             "learning_rate": _LEARNING_RATE,
             "training_device": "cpu",
+            "parameter_count": int(
+                sum(
+                    parameter.numel()
+                    for parameter in model.parameters()
+                )
+            ),
             "final_training_loss": final_loss,
         },
     )
@@ -276,3 +282,178 @@ def _prediction_function(
         }
 
     return predict_decision
+
+
+def build_pytorch_native_batch_candidate(
+    corpus: APTrainingCorpus,
+) -> tuple[
+    PythonCallableTransformation,
+    Callable[
+        [Sequence[dict[str, JsonValue]]],
+        tuple[JsonValue, ...],
+    ],
+]:
+    """Build one PyTorch candidate with scalar and native-batch paths."""
+    model, final_loss = _train_model(
+        corpus
+    )
+
+    parameter_count = int(
+        sum(
+            parameter.numel()
+            for parameter in model.parameters()
+        )
+    )
+
+    descriptor = TransformationDescriptor(
+        transformation_id=(
+            "synthetic-ap-pytorch-mlp-replacement"
+        ),
+        version="1.0.0",
+        name="Synthetic AP PyTorch MLP replacement",
+        description=(
+            "Feed-forward PyTorch candidate trained on the "
+            "synthetic AP training corpus."
+        ),
+        category=TransformationCategory.MODEL,
+        declared_effects=frozenset(
+            {Effect.NONE}
+        ),
+        supported_risk_levels=frozenset(
+            RiskLevel
+        ),
+        required_capabilities=frozenset(
+            {
+                "typed-inputs",
+                "tabular-features",
+                "trained-model",
+                "pytorch-inference",
+            }
+        ),
+    )
+
+    transformation = PythonCallableTransformation(
+        descriptor=descriptor,
+        implementation_id=(
+            "synthetic-ap-pytorch-mlp-v1"
+        ),
+        function=_prediction_function(
+            model
+        ),
+        configuration={
+            "model_family": "pytorch_mlp",
+            "training_seed": corpus.seed,
+            "training_cases": len(
+                corpus.cases
+            ),
+            "feature_count": len(
+                AP_TABULAR_FEATURE_NAMES
+            ),
+            "hidden_dimensions": list(
+                _HIDDEN_DIMENSIONS
+            ),
+            "training_epochs": (
+                _TRAINING_EPOCHS
+            ),
+            "learning_rate": (
+                _LEARNING_RATE
+            ),
+            "training_device": "cpu",
+            "parameter_count": (
+                parameter_count
+            ),
+            "final_training_loss": (
+                final_loss
+            ),
+        },
+    )
+
+    return (
+        transformation,
+        _native_batch_prediction_function(
+            model
+        ),
+    )
+
+
+def _native_batch_prediction_function(
+    model: APTabularNetwork,
+) -> Callable[
+    [Sequence[dict[str, JsonValue]]],
+    tuple[JsonValue, ...],
+]:
+    """Build genuine vectorised PyTorch inference over one input batch."""
+
+    def predict_batch(
+        items: Sequence[
+            dict[str, JsonValue]
+        ],
+    ) -> tuple[
+        JsonValue,
+        ...,
+    ]:
+        if not items:
+            return ()
+
+        features = np.asarray(
+            [
+                _transform_features(
+                    extract_ap_tabular_features(
+                        item
+                    )
+                )
+                for item in items
+            ],
+            dtype=np.float32,
+        )
+
+        tensor = torch.from_numpy(
+            features
+        )
+
+        with torch.inference_mode():
+            logits = model(
+                tensor
+            )
+
+            predictions = (
+                torch.argmax(
+                    logits,
+                    dim=1,
+                )
+                .cpu()
+                .tolist()
+            )
+
+        outputs: list[
+            JsonValue
+        ] = []
+
+        for prediction in predictions:
+            class_index = int(
+                prediction
+            )
+
+            try:
+                decision = (
+                    _INDEX_TO_DECISION[
+                        class_index
+                    ]
+                )
+            except KeyError as exc:
+                raise RuntimeError(
+                    "Unsupported predicted "
+                    f"class index: {class_index}"
+                ) from exc
+
+            outputs.append(
+                {
+                    "decision": decision,
+                }
+            )
+
+        return tuple(
+            outputs
+        )
+
+    return predict_batch

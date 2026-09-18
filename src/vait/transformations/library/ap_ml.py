@@ -1,6 +1,6 @@
 """Classical ML candidates for the synthetic AP benchmark."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -218,3 +218,255 @@ def _prediction_function(
         }
 
     return predict_decision
+
+
+def build_random_forest_native_batch_candidate(
+    corpus: APTrainingCorpus,
+) -> tuple[
+    PythonCallableTransformation,
+    Callable[
+        [Sequence[dict[str, JsonValue]]],
+        tuple[JsonValue, ...],
+    ],
+]:
+    """Build Random Forest scalar and genuine vectorised batch paths."""
+    features, labels = _training_matrix(
+        corpus
+    )
+
+    model = RandomForestClassifier(
+        n_estimators=300,
+        max_depth=None,
+        min_samples_leaf=1,
+        random_state=corpus.seed,
+        n_jobs=1,
+    )
+
+    model.fit(
+        features,
+        labels,
+    )
+
+    descriptor = TransformationDescriptor(
+        transformation_id=(
+            "synthetic-ap-random-forest-replacement"
+        ),
+        version="1.0.0",
+        name="Synthetic AP Random Forest replacement",
+        description=(
+            "Supervised Random Forest candidate trained on a separate "
+            "synthetic AP training corpus."
+        ),
+        category=TransformationCategory.MODEL,
+        declared_effects=frozenset(
+            {Effect.NONE}
+        ),
+        supported_risk_levels=frozenset(
+            RiskLevel
+        ),
+        required_capabilities=frozenset(
+            {
+                "typed-inputs",
+                "tabular-features",
+                "trained-model",
+            }
+        ),
+    )
+
+    transformation = PythonCallableTransformation(
+        descriptor=descriptor,
+        implementation_id=(
+            "synthetic-ap-random-forest-v1"
+        ),
+        function=_prediction_function(
+            model.predict
+        ),
+        configuration={
+            "model_family": "random_forest",
+            "training_seed": corpus.seed,
+            "training_cases": len(
+                corpus.cases
+            ),
+            "feature_count": len(
+                AP_TABULAR_FEATURE_NAMES
+            ),
+            "n_estimators": 300,
+            "n_jobs": 1,
+        },
+    )
+
+    return (
+        transformation,
+        _native_batch_prediction_function(
+            model.predict
+        ),
+    )
+
+
+def build_xgboost_native_batch_candidate(
+    corpus: APTrainingCorpus,
+) -> tuple[
+    PythonCallableTransformation,
+    Callable[
+        [Sequence[dict[str, JsonValue]]],
+        tuple[JsonValue, ...],
+    ],
+]:
+    """Build XGBoost scalar and genuine vectorised batch paths."""
+    features, labels = _training_matrix(
+        corpus
+    )
+
+    model = XGBClassifier(
+        n_estimators=160,
+        max_depth=5,
+        learning_rate=0.08,
+        subsample=1.0,
+        colsample_bytree=1.0,
+        objective="multi:softmax",
+        num_class=len(
+            _DECISION_TO_INDEX
+        ),
+        eval_metric="mlogloss",
+        random_state=corpus.seed,
+        n_jobs=1,
+        tree_method="hist",
+        verbosity=0,
+    )
+
+    model.fit(
+        features,
+        labels,
+    )
+
+    descriptor = TransformationDescriptor(
+        transformation_id=(
+            "synthetic-ap-xgboost-replacement"
+        ),
+        version="1.0.0",
+        name="Synthetic AP XGBoost replacement",
+        description=(
+            "Supervised XGBoost candidate trained on a separate "
+            "synthetic AP training corpus."
+        ),
+        category=TransformationCategory.MODEL,
+        declared_effects=frozenset(
+            {Effect.NONE}
+        ),
+        supported_risk_levels=frozenset(
+            RiskLevel
+        ),
+        required_capabilities=frozenset(
+            {
+                "typed-inputs",
+                "tabular-features",
+                "trained-model",
+            }
+        ),
+    )
+
+    transformation = PythonCallableTransformation(
+        descriptor=descriptor,
+        implementation_id=(
+            "synthetic-ap-xgboost-v1"
+        ),
+        function=_prediction_function(
+            model.predict
+        ),
+        configuration={
+            "model_family": "xgboost",
+            "training_seed": corpus.seed,
+            "training_cases": len(
+                corpus.cases
+            ),
+            "feature_count": len(
+                AP_TABULAR_FEATURE_NAMES
+            ),
+            "n_estimators": 160,
+            "max_depth": 5,
+            "learning_rate": 0.08,
+            "n_jobs": 1,
+        },
+    )
+
+    return (
+        transformation,
+        _native_batch_prediction_function(
+            model.predict
+        ),
+    )
+
+
+def _native_batch_prediction_function(
+    predict: PredictionFunction,
+) -> Callable[
+    [Sequence[dict[str, JsonValue]]],
+    tuple[JsonValue, ...],
+]:
+    """Wrap a fitted classical classifier as native vectorised inference."""
+
+    def predict_batch(
+        items: Sequence[
+            dict[str, JsonValue]
+        ],
+    ) -> tuple[
+        JsonValue,
+        ...,
+    ]:
+        if not items:
+            return ()
+
+        features = np.asarray(
+            [
+                extract_ap_tabular_features(
+                    item
+                )
+                for item in items
+            ],
+            dtype=np.float64,
+        )
+
+        predictions = predict(
+            features
+        )
+
+        if predictions.size != len(
+            items
+        ):
+            raise RuntimeError(
+                "AP batch classifier must return "
+                "exactly one prediction per input."
+            )
+
+        outputs: list[
+            JsonValue
+        ] = []
+
+        for prediction in predictions:
+            class_index = int(
+                prediction
+            )
+
+            try:
+                decision = (
+                    _INDEX_TO_DECISION[
+                        class_index
+                    ]
+                )
+            except KeyError as exc:
+                raise RuntimeError(
+                    "Unsupported predicted "
+                    f"class index: {class_index}"
+                ) from exc
+
+            outputs.append(
+                {
+                    "decision": decision,
+                }
+            )
+
+        return tuple(
+            outputs
+        )
+
+    return predict_batch

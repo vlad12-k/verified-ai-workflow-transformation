@@ -45,6 +45,7 @@ def test_pytorch_candidate_has_model_descriptor(
     assert transformation.configuration["training_seed"] == 20260916
     assert transformation.configuration["feature_count"] == 11
     assert transformation.configuration["training_device"] == "cpu"
+    assert transformation.configuration["parameter_count"] > 0
 
 
 def test_pytorch_candidate_executes_through_vait_runner(
