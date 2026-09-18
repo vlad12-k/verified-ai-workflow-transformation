@@ -39,6 +39,7 @@ _TRACKED_PACKAGES = (
     "scikit-learn",
     "xgboost",
     "torch",
+    "torchao",
     "tensorflow",
     "sentence-transformers",
     "transformers",
