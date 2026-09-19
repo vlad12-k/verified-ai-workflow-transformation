@@ -23,3 +23,18 @@ class ReadinessProbe(Protocol):
 def ready_without_dependencies() -> tuple[ReadinessCheck, ...]:
     """Report readiness when no external dependencies are required yet."""
     return ()
+
+
+def combine_readiness_probes(
+    *probes: ReadinessProbe,
+) -> ReadinessProbe:
+    """Combine required readiness probes into one stable probe."""
+
+    def combined() -> tuple[ReadinessCheck, ...]:
+        return tuple(
+            check
+            for probe in probes
+            for check in probe()
+        )
+
+    return combined

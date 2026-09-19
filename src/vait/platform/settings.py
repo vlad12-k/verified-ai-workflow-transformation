@@ -2,7 +2,7 @@
 
 from typing import Literal, Self
 
-from pydantic import model_validator
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DeploymentEnvironment = Literal[
@@ -26,6 +26,7 @@ class PlatformSettings(BaseSettings):
     environment: DeploymentEnvironment = "development"
     api_prefix: str = "/api/v1"
     debug: bool = False
+    database_url: SecretStr | None = None
 
     @model_validator(mode="after")
     def validate_secure_defaults(self) -> Self:

@@ -71,6 +71,8 @@ platform = [
     "pydantic-settings>=2.7,<3.0",
     "fastapi>=0.115,<1.0",
     "uvicorn>=0.30,<1.0",
+    "sqlalchemy>=2.0,<3.0",
+    "psycopg[binary]>=3.2,<4.0",
 ]
 
 [project.scripts]
