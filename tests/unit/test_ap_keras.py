@@ -47,7 +47,12 @@ def test_keras_transformation_returns_ap_decision() -> None:
         corpus.cases[0].input_data
     )
 
-    assert result["decision"] in {
+    assert isinstance(result, dict)
+
+    decision = result.get("decision")
+
+    assert isinstance(decision, str)
+    assert decision in {
         "HOLD",
         "RECOMMEND_APPROVE",
         "REVIEW",

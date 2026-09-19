@@ -324,7 +324,7 @@ if not isinstance(
         "Guarded RAG artifact is missing configuration."
     )
 
-report = {
+report: dict[str, Any] = {
     "artifact_id": (
         "m3-heterogeneous-evidence-v0.1"
     ),

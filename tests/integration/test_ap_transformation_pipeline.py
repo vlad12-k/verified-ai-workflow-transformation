@@ -14,6 +14,9 @@ from vait.transformations.applicability import ApplicabilityContext
 from vait.transformations.library.synthetic_ap import (
     build_synthetic_ap_transformation,
 )
+from vait.transformations.python_callable import (
+    PythonCallableTransformation,
+)
 from vait.transformations.registry import TransformationRegistry
 
 
@@ -32,6 +35,15 @@ def test_ap_transformation_runs_end_to_end() -> None:
         "synthetic-ap-rule-replacement",
         "1.0.0",
     )
+
+    if not isinstance(
+        registered,
+        PythonCallableTransformation,
+    ):
+        raise TypeError(
+            "Registered AP transformation does not support "
+            "Python candidate preparation."
+        )
 
     preparation = registered.prepare_candidate(
         ApplicabilityContext(

@@ -329,7 +329,7 @@ for epoch in range(
         best_epoch = epoch
 
         model.save_pretrained(
-            ADAPTER_PATH
+            str(ADAPTER_PATH)
         )
 
 if best_epoch == 0:

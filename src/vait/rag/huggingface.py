@@ -1,5 +1,7 @@
 """Local Hugging Face causal-language-model RAG generator."""
 
+from dataclasses import dataclass
+from time import perf_counter_ns
 from typing import Any, Protocol, Self, cast
 
 import torch
@@ -36,6 +38,16 @@ class _LocalCausalModel(Protocol):
     ) -> torch.Tensor:
         """Generate token IDs from encoded model inputs."""
         ...
+
+
+@dataclass(frozen=True)
+class HuggingFaceGenerationEvidence:
+    """Exact token and generation timing evidence from local HF inference."""
+
+    generation: RAGGeneration
+    input_tokens: int
+    output_tokens: int
+    model_generation_latency_ms: float
 
 
 class HuggingFaceCausalGenerator:
@@ -149,8 +161,22 @@ class HuggingFaceCausalGenerator:
         request: RAGGenerationRequest,
     ) -> RAGGeneration:
         """Generate from supplied evidence or explicitly abstain."""
+        return self.generate_with_evidence(
+            request
+        ).generation
+
+    def generate_with_evidence(
+        self,
+        request: RAGGenerationRequest,
+    ) -> HuggingFaceGenerationEvidence:
+        """Generate while preserving exact local inference usage evidence."""
         if not request.context_documents:
-            return self._abstain()
+            return HuggingFaceGenerationEvidence(
+                generation=self._abstain(),
+                input_tokens=0,
+                output_tokens=0,
+                model_generation_latency_ms=0.0,
+            )
 
         ordered_context = tuple(
             sorted(
@@ -162,7 +188,12 @@ class HuggingFaceCausalGenerator:
         strongest_document = ordered_context[0]
 
         if strongest_document.score < self._minimum_score:
-            return self._abstain()
+            return HuggingFaceGenerationEvidence(
+                generation=self._abstain(),
+                input_tokens=0,
+                output_tokens=0,
+                model_generation_latency_ms=0.0,
+            )
 
         messages = build_rag_messages(
             request,
@@ -190,6 +221,8 @@ class HuggingFaceCausalGenerator:
             model_inputs["input_ids"].shape[1]
         )
 
+        generation_started = perf_counter_ns()
+
         with torch.inference_mode():
             output = self._model.generate(
                 **model_inputs,
@@ -198,10 +231,18 @@ class HuggingFaceCausalGenerator:
                 pad_token_id=self._tokenizer.eos_token_id,
             )
 
+        model_generation_latency_ms = (
+            perf_counter_ns() - generation_started
+        ) / 1_000_000
+
         generated_tokens = output[
             0,
             prompt_length:,
         ]
+
+        output_token_count = int(
+            generated_tokens.numel()
+        )
 
         decoded_answer = self._tokenizer.decode(
             generated_tokens,
@@ -216,19 +257,25 @@ class HuggingFaceCausalGenerator:
 
         answer = decoded_answer.strip()
 
-        if not answer:
-            return self._abstain()
+        if not answer or answer == INSUFFICIENT_EVIDENCE:
+            generation = self._abstain()
+        else:
+            generation = RAGGeneration(
+                answer=answer,
+                cited_document_ids=tuple(
+                    document.document_id
+                    for document in ordered_context
+                ),
+                abstained=False,
+            )
 
-        if answer == INSUFFICIENT_EVIDENCE:
-            return self._abstain()
-
-        return RAGGeneration(
-            answer=answer,
-            cited_document_ids=tuple(
-                document.document_id
-                for document in ordered_context
+        return HuggingFaceGenerationEvidence(
+            generation=generation,
+            input_tokens=prompt_length,
+            output_tokens=output_token_count,
+            model_generation_latency_ms=(
+                model_generation_latency_ms
             ),
-            abstained=False,
         )
 
     @staticmethod

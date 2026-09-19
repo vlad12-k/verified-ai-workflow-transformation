@@ -9,13 +9,17 @@ from vait.transformations.library.ap_torch import (
 )
 from vait.transformations.library.ap_training import (
     AP_DECISIONS,
+    APTrainingCorpus,
     build_synthetic_ap_training_corpus,
 )
 from vait.transformations.models import TransformationCategory
+from vait.transformations.python_callable import (
+    PythonCallableTransformation,
+)
 
 
 @pytest.fixture(scope="module")
-def training_corpus():
+def training_corpus() -> APTrainingCorpus:
     """Create one reproducible corpus for PyTorch tests."""
     return build_synthetic_ap_training_corpus(
         sample_count=600,
@@ -24,7 +28,9 @@ def training_corpus():
 
 
 @pytest.fixture(scope="module")
-def transformation(training_corpus):
+def transformation(
+    training_corpus: APTrainingCorpus,
+) -> PythonCallableTransformation:
     """Train one PyTorch candidate for the module."""
     return build_pytorch_transformation(
         training_corpus
@@ -32,7 +38,7 @@ def transformation(training_corpus):
 
 
 def test_pytorch_candidate_has_model_descriptor(
-    transformation,
+    transformation: PythonCallableTransformation,
 ) -> None:
     """PyTorch candidate should expose reproducibility metadata."""
     assert (
@@ -45,10 +51,17 @@ def test_pytorch_candidate_has_model_descriptor(
     assert transformation.configuration["training_seed"] == 20260916
     assert transformation.configuration["feature_count"] == 11
     assert transformation.configuration["training_device"] == "cpu"
+    parameter_count = transformation.configuration[
+        "parameter_count"
+    ]
+
+    assert isinstance(parameter_count, int)
+    assert not isinstance(parameter_count, bool)
+    assert parameter_count > 0
 
 
 def test_pytorch_candidate_executes_through_vait_runner(
-    transformation,
+    transformation: PythonCallableTransformation,
 ) -> None:
     """PyTorch inference should execute through the common VAIT runner."""
     preparation = transformation.prepare_candidate(
@@ -90,7 +103,7 @@ def test_pytorch_candidate_executes_through_vait_runner(
 
 
 def test_pytorch_candidate_requires_pytorch_capability(
-    transformation,
+    transformation: PythonCallableTransformation,
 ) -> None:
     """Missing PyTorch capability should block candidate preparation."""
     preparation = transformation.prepare_candidate(
@@ -112,7 +125,7 @@ def test_pytorch_candidate_requires_pytorch_capability(
 
 
 def test_pytorch_training_is_reproducible(
-    training_corpus,
+    training_corpus: APTrainingCorpus,
 ) -> None:
     """Fixed training seed should reproduce predictions."""
     first = build_pytorch_transformation(

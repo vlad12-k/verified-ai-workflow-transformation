@@ -2,6 +2,13 @@
 
 import json
 from pathlib import Path
+from typing import Any
+
+from pydantic import TypeAdapter
+
+_JSON_OBJECT_ADAPTER = TypeAdapter(
+    dict[str, Any]
+)
 
 PYTORCH_TRAINING_PATH = Path(
     "artifacts/benchmarks/"
@@ -32,19 +39,23 @@ PYTORCH_ID = "synthetic-ap-pytorch-mlp-v1"
 KERAS_ID = "synthetic-ap-keras-mlp-v1"
 
 
-def load_json(path: Path) -> dict[str, object]:
+def load_json(path: Path) -> dict[str, Any]:
     """Load one JSON evidence artifact."""
-    return json.loads(
+    decoded: object = json.loads(
         path.read_text(
             encoding="utf-8"
         )
     )
 
+    return _JSON_OBJECT_ADAPTER.validate_python(
+        decoded
+    )
+
 
 def find_verification(
-    report: dict[str, object],
+    report: dict[str, Any],
     candidate_id: str,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Return verification payload for one candidate."""
     assessments = report["assessments"]
 
@@ -83,7 +94,9 @@ def find_verification(
                 f"Missing verification payload for {candidate_id}."
             )
 
-        return payload
+        return _JSON_OBJECT_ADAPTER.validate_python(
+            payload
+        )
 
     raise RuntimeError(
         f"Candidate not found: {candidate_id}"
@@ -164,7 +177,7 @@ if not isinstance(
         "Missing Keras latency evidence."
     )
 
-comparison = {
+comparison: dict[str, Any] = {
     "comparison_id": (
         "ap-pytorch-vs-keras-v0.1"
     ),

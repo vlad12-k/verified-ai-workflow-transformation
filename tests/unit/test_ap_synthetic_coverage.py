@@ -1,5 +1,7 @@
 """Tests for synthetic AP coverage and leakage checks."""
 
+from pydantic import JsonValue
+
 from vait.benchmark.loader import load_benchmark
 from vait.transformations.library.ap_synthetic_coverage import (
     evaluate_synthetic_ap_coverage,
@@ -64,7 +66,7 @@ def test_coverage_detects_evaluation_overlap() -> None:
 
 def test_incomplete_corpus_fails_required_coverage() -> None:
     """Class presence alone must not imply risk-region coverage."""
-    base_input = {
+    base_input: dict[str, JsonValue] = {
         "invoice_amount": 100.0,
         "purchase_order_amount": 100.0,
         "purchase_order_present": True,

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import bitsandbytes as bnb
 import torch
+from bitsandbytes.nn.modules import Linear4bit
 from peft import (
     LoraConfig,
     TaskType,
@@ -57,7 +58,7 @@ if not torch.backends.mps.is_available():
     )
 
 
-quantization_config = BitsAndBytesConfig(
+quantization_config = BitsAndBytesConfig(  # type: ignore[no-untyped-call]
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
     bnb_4bit_use_double_quant=True,
@@ -83,7 +84,7 @@ linear4bit_modules = [
     for name, module in base_model.named_modules()
     if isinstance(
         module,
-        bnb.nn.Linear4bit,
+        Linear4bit,
     )
 ]
 
@@ -92,7 +93,7 @@ if not linear4bit_modules:
         "QLoRA base model contains no Linear4bit modules."
     )
 
-prepared_model = prepare_model_for_kbit_training(
+prepared_model = prepare_model_for_kbit_training(  # type: ignore[no-untyped-call]
     base_model,
     use_gradient_checkpointing=False,
 )

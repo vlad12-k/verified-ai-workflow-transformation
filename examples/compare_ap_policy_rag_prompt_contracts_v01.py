@@ -4,10 +4,16 @@ import json
 from pathlib import Path
 from typing import Any
 
+from pydantic import TypeAdapter
+
 from vait.rag.faithfulness import (
     FaithfulnessEvaluationReport,
     evaluate_faithfulness_annotations,
     load_faithfulness_annotations,
+)
+
+_ARTIFACT_ADAPTER = TypeAdapter(
+    dict[str, Any]
 )
 
 BASELINE_ARTIFACT = Path(
@@ -33,10 +39,14 @@ def load_artifact(
     path: Path,
 ) -> dict[str, Any]:
     """Load one experiment artifact."""
-    return json.loads(
+    decoded: object = json.loads(
         path.read_text(
             encoding="utf-8"
         )
+    )
+
+    return _ARTIFACT_ADAPTER.validate_python(
+        decoded
     )
 
 

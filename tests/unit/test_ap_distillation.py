@@ -86,7 +86,7 @@ def test_distillation_loss_is_finite_and_backpropagates() -> None:
 
     assert torch.isfinite(loss)
 
-    loss.backward()
+    torch.autograd.backward(loss)
 
     student_gradients = [
         parameter.grad

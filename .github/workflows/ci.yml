@@ -27,6 +27,7 @@ jobs:
       MKL_NUM_THREADS: "1"
       OPENBLAS_NUM_THREADS: "1"
       VECLIB_MAXIMUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
 
     steps:
       - name: Check out repository
@@ -49,7 +50,7 @@ jobs:
           "torch==2.14.0+cpu"
 
       - name: Install project
-        run: python -m pip install -e ".[dev,ml,tensorflow,embeddings,slm,peft]"
+        run: python -m pip install -e ".[dev,ml,tensorflow,embeddings,slm,peft,torchao]"
 
       - name: Verify CPU PyTorch
         run: >
@@ -59,16 +60,20 @@ jobs:
           print('cuda:', torch.version.cuda);
           assert torch.version.cuda is None"
 
+      - name: Compile Python
+        run: python -m compileall -q src tests examples
+
       - name: Ruff
         run: ruff check .
 
       - name: Mypy
-        run: mypy src
+        run: mypy src tests examples
 
       - name: Tests and coverage
         run: >
           pytest
           --cov=vait
+          --cov-branch
           --cov-report=term-missing
           --cov-fail-under=85
 
@@ -83,3 +88,8 @@ jobs:
           python examples/verify_ap_ml_candidates_v02.py
           python examples/verify_ap_torch_candidate_v02.py
           python examples/evaluate_ap_cost_performance_v01.py
+
+      - name: M4 optimisation smoke checks
+        run: |
+          python examples/analyse_m4i_multi_objective_v01.py
+          python examples/build_m4j_recommendation_plan_v01.py

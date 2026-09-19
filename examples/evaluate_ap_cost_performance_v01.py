@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from pydantic import JsonValue
+
 from vait.benchmark.loader import load_benchmark
 from vait.benchmark.reporting import write_benchmark_report
 from vait.benchmark.verification import verify_benchmark_bounded
@@ -16,6 +18,9 @@ from vait.economics.metrics import (
 from vait.transformations.applicability import ApplicabilityContext
 from vait.transformations.library.synthetic_ap import (
     build_synthetic_ap_transformation,
+)
+from vait.transformations.python_callable import (
+    PythonCallableTransformation,
 )
 from vait.transformations.registry import TransformationRegistry
 
@@ -36,7 +41,7 @@ def build_declared_costs() -> tuple[CostEstimate, CostEstimate]:
     evidence pipeline. They are not provider prices or production ROI
     claims.
     """
-    common_metadata = {
+    common_metadata: dict[str, JsonValue] = {
         "scope": "controlled-development-only",
         "production_price_claim": False,
         "provider_price_claim": False,
@@ -76,6 +81,15 @@ def main() -> None:
         transformation.descriptor.transformation_id,
         transformation.descriptor.version,
     )
+
+    if not isinstance(
+        registered,
+        PythonCallableTransformation,
+    ):
+        raise TypeError(
+            "Registered AP transformation does not support "
+            "Python candidate preparation."
+        )
 
     preparation = registered.prepare_candidate(
         ApplicabilityContext(

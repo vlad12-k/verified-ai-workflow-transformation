@@ -1,0 +1,209 @@
+"""Typed evidence models for controlled inference benchmarking."""
+
+from datetime import datetime
+
+from pydantic import BaseModel, Field, JsonValue
+
+
+class InferenceConfiguration(BaseModel):
+    """Execution configuration attached to one inference benchmark run."""
+
+    provider: str = Field(min_length=1)
+    runtime: str = Field(min_length=1)
+    device: str = Field(min_length=1)
+    dtype: str = Field(min_length=1)
+    batch_size: int = Field(ge=1)
+
+    model_id: str | None = None
+    model_revision: str | None = None
+
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class InferenceWorkload(BaseModel):
+    """Identity and scope of one controlled inference workload."""
+
+    workload_id: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    item_count: int = Field(ge=1)
+
+    fingerprint_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class InferenceSetupEvidence(BaseModel):
+    """Timing evidence for candidate preparation outside measured inference."""
+
+    duration_ms: float = Field(
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+
+    scope: str = Field(min_length=1)
+
+    included_operations: list[str] = Field(
+        min_length=1,
+    )
+
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class InferenceLatencySummary(BaseModel):
+    """Latency distribution for measured inference observations."""
+
+    count: int = Field(ge=1)
+
+    mean_ms: float = Field(ge=0.0, allow_inf_nan=False)
+    p50_ms: float = Field(ge=0.0, allow_inf_nan=False)
+    p95_ms: float = Field(ge=0.0, allow_inf_nan=False)
+    p99_ms: float = Field(ge=0.0, allow_inf_nan=False)
+    max_ms: float = Field(ge=0.0, allow_inf_nan=False)
+
+
+class InferenceThroughputSummary(BaseModel):
+    """Normalised throughput measurements for one benchmark run."""
+
+    cases_per_second: float | None = Field(
+        default=None,
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+    requests_per_second: float | None = Field(
+        default=None,
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+    tokens_per_second: float | None = Field(
+        default=None,
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+
+
+class GenerativeInferenceSample(BaseModel):
+    """One generative inference observation."""
+
+    time_to_first_token_ms: float | None = Field(
+        default=None,
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+    generation_latency_ms: float | None = Field(
+        default=None,
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+
+
+class GenerativeInferenceSummary(BaseModel):
+    """Aggregated generative inference evidence."""
+
+    sample_count: int = Field(ge=1)
+
+    time_to_first_token: InferenceLatencySummary | None = None
+    generation_latency: InferenceLatencySummary | None = None
+
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+
+
+class InferenceResourceEvidence(BaseModel):
+    """Process resource evidence for one controlled measurement interval."""
+
+    measurement_scope: str = Field(min_length=1)
+
+    wall_time_ms: float = Field(
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+    process_cpu_time_ms: float = Field(
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+    cpu_time_to_wall_time_ratio: float | None = Field(
+        default=None,
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+
+    process_peak_rss_baseline_bytes: int | None = Field(
+        default=None,
+        ge=0,
+    )
+    process_peak_rss_bytes: int | None = Field(
+        default=None,
+        ge=0,
+    )
+    process_peak_rss_growth_bytes: int | None = Field(
+        default=None,
+        ge=0,
+    )
+
+    peak_rss_scope: str = (
+        "process-lifetime-high-water-mark"
+    )
+
+
+class InferenceEnvironment(BaseModel):
+    """Environment metadata required to interpret inference measurements."""
+
+    python_version: str = Field(min_length=1)
+    platform: str = Field(min_length=1)
+    system: str = Field(min_length=1)
+    machine: str = Field(min_length=1)
+    processor: str = Field(min_length=1)
+
+    logical_cpu_count: int | None = Field(
+        default=None,
+        ge=1,
+    )
+    physical_memory_bytes: int | None = Field(
+        default=None,
+        ge=1,
+    )
+
+    source_revision: str | None = None
+    source_dirty: bool | None = None
+
+    package_versions: dict[str, str] = Field(default_factory=dict)
+
+
+class InferenceBenchmarkReport(BaseModel):
+    """Versioned machine-readable controlled inference evidence."""
+
+    schema_version: str = "0.1"
+
+    run_id: str = Field(min_length=1)
+    created_at: datetime
+
+    candidate_implementation_id: str = Field(min_length=1)
+    task_family: str = Field(min_length=1)
+
+    workload: InferenceWorkload | None = None
+    setup: InferenceSetupEvidence | None = None
+
+    warmup_iterations: int = Field(ge=0)
+    measured_iterations: int = Field(ge=1)
+
+    cold_start_latency_ms: float | None = Field(
+        default=None,
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+
+    configuration: InferenceConfiguration
+    latency: InferenceLatencySummary
+    throughput: InferenceThroughputSummary
+
+    generative: GenerativeInferenceSummary | None = None
+    resources: InferenceResourceEvidence | None = None
+    environment: InferenceEnvironment
+
+    evidence_metadata: dict[str, JsonValue] = Field(default_factory=dict)

@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 TRAINING_PATH = Path(
     "artifacts/benchmarks/"
@@ -49,7 +50,7 @@ verification_by_id = {
 
 def verification_payload(
     candidate_id: str,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Return one verified candidate payload."""
     assessment = verification_by_id[
         candidate_id
@@ -82,8 +83,8 @@ distilled_verification = verification_payload(
 
 
 def evidence_summary(
-    payload: dict[str, object],
-) -> dict[str, object]:
+    payload: dict[str, Any],
+) -> dict[str, Any]:
     """Extract bounded verification and latency evidence."""
     evidence = payload.get(
         "statistical_evidence"
