@@ -6,10 +6,10 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import Engine, create_engine, text
 
 _DATABASE_ENV = "VAIT_TEST_MIGRATION_DATABASE_URL"
-_BASELINE_REVISION = "0001_m5d_baseline"
 _ROOT = Path(__file__).resolve().parents[2]
 _ALEMBIC_INI = _ROOT / "alembic.ini"
 
@@ -30,6 +30,17 @@ def migration_database_url() -> str:
 def _alembic_config() -> Config:
     """Return repository Alembic configuration."""
     return Config(str(_ALEMBIC_INI))
+
+
+def _expected_head() -> str:
+    """Return the single migration head declared by the repository."""
+    scripts = ScriptDirectory.from_config(_alembic_config())
+    head = scripts.get_current_head()
+
+    if head is None:
+        raise AssertionError("Alembic migration history has no head")
+
+    return head
 
 
 def _version_table_exists(engine: Engine) -> bool:
@@ -84,6 +95,7 @@ def test_postgresql_upgrade_downgrade_upgrade_lifecycle(
     )
 
     config = _alembic_config()
+    expected_head = _expected_head()
     engine = create_engine(migration_database_url)
 
     try:
@@ -104,7 +116,7 @@ def test_postgresql_upgrade_downgrade_upgrade_lifecycle(
         command.upgrade(config, "head")
 
         assert _version_table_exists(engine) is True
-        assert _current_revision(engine) == _BASELINE_REVISION
+        assert _current_revision(engine) == expected_head
 
         # Current head -> base.
         command.downgrade(config, "base")
@@ -115,6 +127,6 @@ def test_postgresql_upgrade_downgrade_upgrade_lifecycle(
         # Base -> current head again.
         command.upgrade(config, "head")
 
-        assert _current_revision(engine) == _BASELINE_REVISION
+        assert _current_revision(engine) == expected_head
     finally:
         engine.dispose()

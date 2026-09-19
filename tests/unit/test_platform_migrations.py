@@ -14,17 +14,20 @@ _ROOT = Path(__file__).resolve().parents[2]
 _ALEMBIC_INI = _ROOT / "alembic.ini"
 
 
-def test_alembic_has_single_expected_baseline_head() -> None:
-    """Migration history must begin from one deterministic baseline."""
+def test_alembic_preserves_baseline_and_has_single_registry_head() -> None:
+    """Migration history must preserve the baseline and one current head."""
     config = Config(str(_ALEMBIC_INI))
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_current_head() == "0001_m5d_baseline"
+    assert scripts.get_current_head() == "0002_m5e_registry"
 
-    revision = scripts.get_revision("0001_m5d_baseline")
+    baseline = scripts.get_revision("0001_m5d_baseline")
+    registry = scripts.get_revision("0002_m5e_registry")
 
-    assert revision is not None
-    assert revision.down_revision is None
+    assert baseline is not None
+    assert baseline.down_revision is None
+    assert registry is not None
+    assert registry.down_revision == "0001_m5d_baseline"
 
 
 def test_alembic_configuration_contains_no_database_credentials() -> None:
