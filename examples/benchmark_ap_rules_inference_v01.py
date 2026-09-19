@@ -17,6 +17,9 @@ from vait.transformations.applicability import ApplicabilityContext
 from vait.transformations.library.synthetic_ap import (
     build_synthetic_ap_transformation,
 )
+from vait.transformations.python_callable import (
+    PythonCallableTransformation,
+)
 from vait.transformations.registry import TransformationRegistry
 
 DATASET_PATH = Path(
@@ -42,6 +45,15 @@ def main() -> None:
         transformation.descriptor.transformation_id,
         transformation.descriptor.version,
     )
+
+    if not isinstance(
+        registered,
+        PythonCallableTransformation,
+    ):
+        raise TypeError(
+            "Registered AP transformation does not support "
+            "Python candidate preparation."
+        )
 
     preparation = registered.prepare_candidate(
         ApplicabilityContext(

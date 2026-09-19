@@ -18,6 +18,7 @@ from vait.optimisation.admissibility import (
 )
 from vait.optimisation.compatibility import (
     InferenceCompatibilityContext,
+    SearchPointCompatibility,
     evaluate_search_point_compatibility,
 )
 from vait.optimisation.search_space import (
@@ -57,7 +58,7 @@ def build_point(
 
 def compatibility_for(
     point: InferenceSearchPoint,
-):
+) -> SearchPointCompatibility:
     """Evaluate one point against a deterministic CPU context."""
     return evaluate_search_point_compatibility(
         point,

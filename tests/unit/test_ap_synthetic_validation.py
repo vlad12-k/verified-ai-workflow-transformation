@@ -1,5 +1,7 @@
 """Tests for synthetic AP corpus validation."""
 
+from pydantic import JsonValue
+
 from vait.transformations.library.ap_synthetic_validation import (
     validate_synthetic_ap_corpus,
 )
@@ -33,7 +35,7 @@ def test_generated_corpus_passes_validation() -> None:
 
 def test_validation_detects_duplicate_inputs() -> None:
     """Exact duplicate synthetic inputs should be reported."""
-    input_data = {
+    input_data: dict[str, JsonValue] = {
         "invoice_amount": 100.0,
         "purchase_order_amount": 100.0,
         "purchase_order_present": True,

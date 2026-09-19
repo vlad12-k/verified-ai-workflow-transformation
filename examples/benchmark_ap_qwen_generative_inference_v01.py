@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from time import perf_counter_ns
 
+from pydantic import JsonValue
+
 from vait.inference.benchmark import (
     run_controlled_generative_benchmark,
 )
@@ -224,9 +226,14 @@ def main() -> None:
         "observed_unique_answer_count"
     ] = len(unique_answers)
 
+    abstention_states: list[JsonValue] = [
+        state
+        for state in unique_abstention_states
+    ]
+
     report.evidence_metadata[
         "observed_abstention_states"
-    ] = unique_abstention_states
+    ] = abstention_states
 
     report_path = write_inference_report(
         report=report,

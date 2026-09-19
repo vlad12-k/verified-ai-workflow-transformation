@@ -10,10 +10,12 @@ from vait.transformations.applicability import (
     ApplicabilityContext,
 )
 from vait.transformations.library.ap_torch_optimisation import (
+    TorchOptimisationCandidate,
     build_pytorch_lower_precision_candidates,
 )
 from vait.transformations.library.ap_training import (
     AP_DECISIONS,
+    APTrainingCorpus,
     build_synthetic_ap_training_corpus,
 )
 from vait.transformations.models import (
@@ -22,7 +24,13 @@ from vait.transformations.models import (
 
 
 @pytest.fixture(scope="module")
-def lower_precision_candidates():
+def lower_precision_candidates() -> tuple[
+    APTrainingCorpus,
+    tuple[
+        TorchOptimisationCandidate,
+        TorchOptimisationCandidate,
+    ],
+]:
     """Build one matched FP16/BF16 pair."""
     corpus = (
         build_synthetic_ap_training_corpus(
@@ -40,7 +48,13 @@ def lower_precision_candidates():
 
 
 def test_lower_precision_candidates_have_distinct_identities(
-    lower_precision_candidates,
+    lower_precision_candidates: tuple[
+        APTrainingCorpus,
+        tuple[
+            TorchOptimisationCandidate,
+            TorchOptimisationCandidate,
+        ],
+    ],
 ) -> None:
     """FP16 and BF16 must remain separate auditable candidates."""
     _, (
@@ -88,9 +102,15 @@ def test_lower_precision_candidates_have_distinct_identities(
     ],
 )
 def test_lower_precision_candidates_record_size_evidence(
-    lower_precision_candidates,
-    candidate_index,
-    precision,
+    lower_precision_candidates: tuple[
+        APTrainingCorpus,
+        tuple[
+            TorchOptimisationCandidate,
+            TorchOptimisationCandidate,
+        ],
+    ],
+    candidate_index: int,
+    precision: str,
 ) -> None:
     """Lower precision must expose measured footprint evidence."""
     _, candidates = (
@@ -170,8 +190,14 @@ def test_lower_precision_candidates_record_size_evidence(
     ],
 )
 def test_lower_precision_scalar_and_batch_are_equivalent(
-    lower_precision_candidates,
-    candidate_index,
+    lower_precision_candidates: tuple[
+        APTrainingCorpus,
+        tuple[
+            TorchOptimisationCandidate,
+            TorchOptimisationCandidate,
+        ],
+    ],
+    candidate_index: int,
 ) -> None:
     """Native batch path must preserve scalar candidate behaviour."""
     corpus, candidates = (
@@ -251,7 +277,13 @@ def test_lower_precision_scalar_and_batch_are_equivalent(
 
 
 def test_fp16_requires_float16_capability(
-    lower_precision_candidates,
+    lower_precision_candidates: tuple[
+        APTrainingCorpus,
+        tuple[
+            TorchOptimisationCandidate,
+            TorchOptimisationCandidate,
+        ],
+    ],
 ) -> None:
     """FP16 candidate must declare its runtime capability."""
     _, (
@@ -282,7 +314,13 @@ def test_fp16_requires_float16_capability(
 
 
 def test_bf16_requires_bfloat16_capability(
-    lower_precision_candidates,
+    lower_precision_candidates: tuple[
+        APTrainingCorpus,
+        tuple[
+            TorchOptimisationCandidate,
+            TorchOptimisationCandidate,
+        ],
+    ],
 ) -> None:
     """BF16 candidate must declare its runtime capability."""
     _, (

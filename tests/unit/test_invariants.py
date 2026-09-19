@@ -1,5 +1,7 @@
 """Tests for declarative invariant evaluation."""
 
+from pydantic import JsonValue
+
 from vait.contracts.invariants import evaluate_invariant
 from vait.contracts.models import Invariant, InvariantOperator
 
@@ -13,7 +15,7 @@ def test_nested_equality_invariant_passes() -> None:
         expected="HOLD",
     )
 
-    output = {
+    output: JsonValue = {
         "result": {
             "decision": "HOLD",
         }

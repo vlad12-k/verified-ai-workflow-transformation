@@ -181,7 +181,18 @@ def test_stdlib_transport_executes_real_local_http_round_trip() -> None:
     )
 
     try:
-        host, port = server.server_address
+        host = server.server_address[0]
+        port = server.server_address[1]
+
+        if not isinstance(host, str):
+            raise TypeError(
+                "Expected IPv4 localhost host string."
+            )
+
+        if not isinstance(port, int):
+            raise TypeError(
+                "Expected localhost TCP port."
+            )
 
         provider = OpenAICompatibleProvider(
             base_url=f"http://{host}:{port}",
@@ -248,7 +259,18 @@ def test_stdlib_transport_preserves_http_error_for_provider_normalisation() -> N
     )
 
     try:
-        host, port = server.server_address
+        host = server.server_address[0]
+        port = server.server_address[1]
+
+        if not isinstance(host, str):
+            raise TypeError(
+                "Expected IPv4 localhost host string."
+            )
+
+        if not isinstance(port, int):
+            raise TypeError(
+                "Expected localhost TCP port."
+            )
 
         provider = OpenAICompatibleProvider(
             base_url=f"http://{host}:{port}/v1",

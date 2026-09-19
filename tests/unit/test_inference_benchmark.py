@@ -1,6 +1,7 @@
 """Tests for controlled inference benchmark evidence utilities."""
 
 import pytest
+from pydantic import JsonValue
 
 from vait.contracts.models import VerificationCase
 from vait.inference.benchmark import (
@@ -174,7 +175,9 @@ def test_controlled_benchmark_runs_warmup_and_measured_rounds() -> None:
     """Controlled execution should produce measured inference evidence."""
     calls: list[int] = []
 
-    def candidate(data: dict[str, object]) -> object:
+    def candidate(
+        data: dict[str, JsonValue],
+    ) -> JsonValue:
         calls.append(1)
         return data
 
@@ -231,7 +234,9 @@ def test_controlled_benchmark_runs_warmup_and_measured_rounds() -> None:
 def test_controlled_benchmark_can_skip_cold_start() -> None:
     """Cold-start evidence should be optional when it is not meaningful."""
 
-    def candidate(data: dict[str, object]) -> object:
+    def candidate(
+        data: dict[str, JsonValue],
+    ) -> JsonValue:
         return data
 
     runner = PythonImplementationRunner(
@@ -268,7 +273,9 @@ def test_controlled_benchmark_can_skip_cold_start() -> None:
 def test_controlled_benchmark_rejects_execution_errors() -> None:
     """Failed inference must not be represented as valid performance evidence."""
 
-    def candidate(data: dict[str, object]) -> object:
+    def candidate(
+        data: dict[str, JsonValue],
+    ) -> JsonValue:
         raise RuntimeError("synthetic inference failure")
 
     runner = PythonImplementationRunner(
@@ -314,7 +321,9 @@ def test_controlled_benchmark_rejects_invalid_round_counts(
 ) -> None:
     """Invalid benchmark execution plans should fail before measurement."""
 
-    def candidate(data: dict[str, object]) -> object:
+    def candidate(
+        data: dict[str, JsonValue],
+    ) -> JsonValue:
         return data
 
     runner = PythonImplementationRunner(

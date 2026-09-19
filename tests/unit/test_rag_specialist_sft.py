@@ -1,5 +1,7 @@
 """Tests for specialist supervised fine-tuning formatting."""
 
+from typing import Any
+
 import pytest
 
 from vait.rag.specialist_sft import (
@@ -15,7 +17,7 @@ from vait.rag.specialist_training import (
 class FakeChatTokenizer:
     """Minimal deterministic tokenizer for SFT unit tests."""
 
-    eos_token_id = 0
+    eos_token_id: int | None = 0
 
     def apply_chat_template(
         self,
@@ -44,7 +46,7 @@ class FakeChatTokenizer:
         text: str,
         *,
         add_special_tokens: bool = False,
-    ) -> dict[str, list[int]]:
+    ) -> dict[str, Any]:
         """Map every character to one deterministic integer token."""
         assert add_special_tokens is False
 

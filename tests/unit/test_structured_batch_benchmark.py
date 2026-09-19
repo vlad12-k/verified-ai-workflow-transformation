@@ -1,5 +1,7 @@
 """Tests for native structured batch inference benchmarking."""
 
+from collections.abc import Sequence
+
 import pytest
 from pydantic import JsonValue
 
@@ -92,7 +94,7 @@ def test_native_batch_series_records_scaling_evidence() -> None:
     ] = []
 
     def operation(
-        batch,
+        batch: Sequence[VerificationCase],
     ) -> tuple[
         JsonValue,
         ...,

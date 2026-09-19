@@ -12,9 +12,11 @@ from vait.transformations.applicability import (
     ApplicabilityContext,
 )
 from vait.transformations.library.ap_torch_optimisation import (
+    TorchCompilationCandidate,
     build_pytorch_compilation_candidate,
 )
 from vait.transformations.library.ap_training import (
+    APTrainingCorpus,
     build_synthetic_ap_training_corpus,
 )
 from vait.transformations.models import (
@@ -23,7 +25,7 @@ from vait.transformations.models import (
 
 
 @pytest.fixture(scope="module")
-def training_corpus():
+def training_corpus() -> APTrainingCorpus:
     """Create one deterministic AP corpus."""
     return (
         build_synthetic_ap_training_corpus(
@@ -35,9 +37,9 @@ def training_corpus():
 
 @pytest.fixture()
 def compiled_candidate(
-    monkeypatch,
-    training_corpus,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    training_corpus: APTrainingCorpus,
+) -> TorchCompilationCandidate:
     """Build candidate with compiler mocked to identity."""
     def fake_compile(
         model: nn.Module,
@@ -63,7 +65,7 @@ def compiled_candidate(
 
 
 def test_compilation_candidate_has_distinct_identity(
-    compiled_candidate,
+    compiled_candidate: TorchCompilationCandidate,
 ) -> None:
     """Compiled execution must remain an auditable candidate."""
     transformation = (
@@ -106,7 +108,7 @@ def test_compilation_candidate_has_distinct_identity(
 
 
 def test_compilation_candidate_records_setup_evidence(
-    compiled_candidate,
+    compiled_candidate: TorchCompilationCandidate,
 ) -> None:
     """Each static search point must retain setup-cost evidence."""
     setup = (
@@ -151,8 +153,8 @@ def test_compilation_candidate_records_setup_evidence(
 
 
 def test_compiled_scalar_and_fixed_batch_are_equivalent(
-    compiled_candidate,
-    training_corpus,
+    compiled_candidate: TorchCompilationCandidate,
+    training_corpus: APTrainingCorpus,
 ) -> None:
     """Compiled batch execution must preserve scalar behaviour."""
     transformation = (
@@ -223,8 +225,8 @@ def test_compiled_scalar_and_fixed_batch_are_equivalent(
 
 
 def test_compiled_batch_rejects_oversized_input(
-    compiled_candidate,
-    training_corpus,
+    compiled_candidate: TorchCompilationCandidate,
+    training_corpus: APTrainingCorpus,
 ) -> None:
     """Static compiled path must not silently exceed its shape."""
     operation = (
@@ -254,7 +256,7 @@ def test_compiled_batch_rejects_oversized_input(
 
 
 def test_compilation_candidate_requires_compile_capability(
-    compiled_candidate,
+    compiled_candidate: TorchCompilationCandidate,
 ) -> None:
     """Missing torch-compile capability must block preparation."""
     transformation = (

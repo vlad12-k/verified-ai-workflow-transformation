@@ -257,9 +257,22 @@ for case, evaluation, trace in zip(
         f"fallback_used={trace['fallback_used']}"
     )
     print(f"top_score={top_score}")
+    latency_ms = trace["latency_ms"]
+
+    if (
+        isinstance(latency_ms, bool)
+        or not isinstance(
+            latency_ms,
+            (int, float),
+        )
+    ):
+        raise TypeError(
+            "Recorded RAG latency must be numeric."
+        )
+
     print(
         f"latency_ms="
-        f"{float(trace['latency_ms']):.2f}"
+        f"{float(latency_ms):.2f}"
     )
     print(f"answer={trace['answer']}")
 

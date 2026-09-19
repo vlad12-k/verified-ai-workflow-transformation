@@ -10,10 +10,12 @@ from vait.transformations.applicability import (
     ApplicabilityContext,
 )
 from vait.transformations.library.ap_torch_optimisation import (
+    TorchOptimisationCandidate,
     build_pytorch_precision_candidates,
 )
 from vait.transformations.library.ap_training import (
     AP_DECISIONS,
+    APTrainingCorpus,
     build_synthetic_ap_training_corpus,
 )
 from vait.transformations.models import (
@@ -22,7 +24,13 @@ from vait.transformations.models import (
 
 
 @pytest.fixture(scope="module")
-def optimisation_candidates():
+def optimisation_candidates() -> tuple[
+    APTrainingCorpus,
+    tuple[
+        TorchOptimisationCandidate,
+        TorchOptimisationCandidate,
+    ],
+]:
     """Build one matched FP32/INT8 candidate pair."""
     corpus = (
         build_synthetic_ap_training_corpus(
@@ -40,7 +48,13 @@ def optimisation_candidates():
 
 
 def test_precision_candidates_have_distinct_identities(
-    optimisation_candidates,
+    optimisation_candidates: tuple[
+        APTrainingCorpus,
+        tuple[
+            TorchOptimisationCandidate,
+            TorchOptimisationCandidate,
+        ],
+    ],
 ) -> None:
     """Baseline and quantised variants must remain auditable candidates."""
     _, (
@@ -70,7 +84,13 @@ def test_precision_candidates_have_distinct_identities(
 
 
 def test_precision_candidates_record_size_evidence(
-    optimisation_candidates,
+    optimisation_candidates: tuple[
+        APTrainingCorpus,
+        tuple[
+            TorchOptimisationCandidate,
+            TorchOptimisationCandidate,
+        ],
+    ],
 ) -> None:
     """Compression evidence must be measured rather than assumed."""
     _, (
@@ -140,8 +160,14 @@ def test_precision_candidates_record_size_evidence(
     ],
 )
 def test_precision_candidate_executes_scalar_and_batch_consistently(
-    optimisation_candidates,
-    candidate_index,
+    optimisation_candidates: tuple[
+        APTrainingCorpus,
+        tuple[
+            TorchOptimisationCandidate,
+            TorchOptimisationCandidate,
+        ],
+    ],
+    candidate_index: int,
 ) -> None:
     """Each optimisation candidate must preserve its scalar/batch behaviour."""
     corpus, candidates = (
@@ -221,7 +247,13 @@ def test_precision_candidate_executes_scalar_and_batch_consistently(
 
 
 def test_int8_candidate_requires_torchao_capability(
-    optimisation_candidates,
+    optimisation_candidates: tuple[
+        APTrainingCorpus,
+        tuple[
+            TorchOptimisationCandidate,
+            TorchOptimisationCandidate,
+        ],
+    ],
 ) -> None:
     """TorchAO candidate must not be applicable without its runtime capability."""
     _, (

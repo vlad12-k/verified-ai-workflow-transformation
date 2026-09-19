@@ -40,11 +40,24 @@ def test_builds_two_distillation_candidates() -> None:
         == "knowledge_distillation"
     )
 
-    assert hard.configuration["parameter_count"] > 0
-    assert distilled.configuration["parameter_count"] > 0
+    hard_parameter_count = hard.configuration[
+        "parameter_count"
+    ]
+    distilled_parameter_count = distilled.configuration[
+        "parameter_count"
+    ]
+
+    assert isinstance(hard_parameter_count, int)
+    assert not isinstance(hard_parameter_count, bool)
+
+    assert isinstance(distilled_parameter_count, int)
+    assert not isinstance(distilled_parameter_count, bool)
+
+    assert hard_parameter_count > 0
+    assert distilled_parameter_count > 0
     assert (
-        hard.configuration["parameter_count"]
-        == distilled.configuration["parameter_count"]
+        hard_parameter_count
+        == distilled_parameter_count
     )
 
 
@@ -99,13 +112,24 @@ def test_distillation_candidates_return_decisions() -> None:
         sample
     )
 
-    assert hard_result["decision"] in {
+    assert isinstance(hard_result, dict)
+    assert isinstance(distilled_result, dict)
+
+    hard_decision = hard_result.get("decision")
+    distilled_decision = distilled_result.get(
+        "decision"
+    )
+
+    assert isinstance(hard_decision, str)
+    assert isinstance(distilled_decision, str)
+
+    assert hard_decision in {
         "HOLD",
         "RECOMMEND_APPROVE",
         "REVIEW",
     }
 
-    assert distilled_result["decision"] in {
+    assert distilled_decision in {
         "HOLD",
         "RECOMMEND_APPROVE",
         "REVIEW",

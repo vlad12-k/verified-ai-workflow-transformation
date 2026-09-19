@@ -1,6 +1,7 @@
 """Tests for synthetic AP tabular feature extraction."""
 
 import pytest
+from pydantic import JsonValue
 
 from vait.transformations.library.ap_tabular import (
     AP_TABULAR_FEATURE_NAMES,
@@ -119,11 +120,11 @@ def test_non_positive_invoice_is_encoded() -> None:
 )
 def test_invalid_feature_values_are_rejected(
     key: str,
-    value: object,
+    value: JsonValue,
     message: str,
 ) -> None:
     """Invalid AP feature types should fail before model execution."""
-    data = {
+    data: dict[str, JsonValue] = {
         "invoice_amount": 500.0,
         "purchase_order_amount": 500.0,
         "purchase_order_present": True,
@@ -133,7 +134,7 @@ def test_invalid_feature_values_are_rejected(
         "tax_id_valid": True,
     }
 
-    data[key] = value  # type: ignore[assignment]
+    data[key] = value
 
     with pytest.raises(
         ValueError,

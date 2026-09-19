@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import JsonValue
 
 from vait.contracts.models import (
     Effect,
@@ -94,8 +95,8 @@ def rejected(
 
 
 def candidate_function(
-    data: dict[str, object],
-) -> dict[str, str]:
+    data: dict[str, JsonValue],
+) -> JsonValue:
     """Return one deterministic structured decision."""
     del data
 
