@@ -66,6 +66,10 @@ qlora = [
     "bitsandbytes==0.50.2",
 ]
 
+platform = [
+    "pydantic-settings>=2.7,<3.0",
+]
+
 [project.scripts]
 vait = "vait.cli:app"
 

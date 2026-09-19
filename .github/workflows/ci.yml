@@ -50,7 +50,7 @@ jobs:
           "torch==2.14.0+cpu"
 
       - name: Install project
-        run: python -m pip install -e ".[dev,ml,tensorflow,embeddings,slm,peft,torchao]"
+        run: python -m pip install -e ".[dev,ml,tensorflow,embeddings,slm,peft,torchao,platform]"
 
       - name: Verify CPU PyTorch
         run: >
