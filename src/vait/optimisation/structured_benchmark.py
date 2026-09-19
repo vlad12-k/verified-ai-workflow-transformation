@@ -131,6 +131,44 @@ class StructuredRepeatabilitySummary(BaseModel):
         allow_inf_nan=False,
     )
 
+    resource_observations: int = Field(
+        ge=0,
+    )
+
+    mean_process_cpu_time_ms: float | None = Field(
+        default=None,
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+
+    mean_cpu_time_to_wall_time_ratio: float | None = Field(
+        default=None,
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+
+    max_cpu_time_to_wall_time_ratio: float | None = Field(
+        default=None,
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+
+    max_process_peak_rss_bytes: int | None = Field(
+        default=None,
+        ge=0,
+    )
+
+    mean_process_peak_rss_growth_bytes: float | None = Field(
+        default=None,
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+
+    max_process_peak_rss_growth_bytes: int | None = Field(
+        default=None,
+        ge=0,
+    )
+
 
 class StructuredBenchmarkSeries(BaseModel):
     """Repeated controlled evidence for one admissible search point."""
@@ -298,6 +336,44 @@ def summarize_structured_repetitions(
         )
     )
 
+    resources = [
+        run.report.resources
+        for run in runs
+        if run.report.resources is not None
+    ]
+
+    process_cpu_times_ms = [
+        resource.process_cpu_time_ms
+        for resource in resources
+    ]
+
+    cpu_ratios = [
+        resource.cpu_time_to_wall_time_ratio
+        for resource in resources
+        if (
+            resource.cpu_time_to_wall_time_ratio
+            is not None
+        )
+    ]
+
+    peak_rss_values = [
+        resource.process_peak_rss_bytes
+        for resource in resources
+        if (
+            resource.process_peak_rss_bytes
+            is not None
+        )
+    ]
+
+    peak_rss_growth_values = [
+        resource.process_peak_rss_growth_bytes
+        for resource in resources
+        if (
+            resource.process_peak_rss_growth_bytes
+            is not None
+        )
+    ]
+
     return StructuredRepeatabilitySummary(
         repetitions=len(runs),
         measured_executions=measured_executions,
@@ -324,6 +400,39 @@ def summarize_structured_repetitions(
         worst_max_latency_ms=max(
             run.report.latency.max_ms
             for run in runs
+        ),
+        resource_observations=len(
+            resources
+        ),
+        mean_process_cpu_time_ms=(
+            fmean(process_cpu_times_ms)
+            if process_cpu_times_ms
+            else None
+        ),
+        mean_cpu_time_to_wall_time_ratio=(
+            fmean(cpu_ratios)
+            if cpu_ratios
+            else None
+        ),
+        max_cpu_time_to_wall_time_ratio=(
+            max(cpu_ratios)
+            if cpu_ratios
+            else None
+        ),
+        max_process_peak_rss_bytes=(
+            max(peak_rss_values)
+            if peak_rss_values
+            else None
+        ),
+        mean_process_peak_rss_growth_bytes=(
+            fmean(peak_rss_growth_values)
+            if peak_rss_growth_values
+            else None
+        ),
+        max_process_peak_rss_growth_bytes=(
+            max(peak_rss_growth_values)
+            if peak_rss_growth_values
+            else None
         ),
     )
 

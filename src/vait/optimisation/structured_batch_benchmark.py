@@ -16,6 +16,10 @@ from vait.inference.models import (
     InferenceEnvironment,
     InferenceSetupEvidence,
 )
+from vait.inference.profiling import (
+    build_process_resource_evidence,
+    capture_process_resource_snapshot,
+)
 from vait.optimisation.admissibility import (
     SearchPointAdmissibility,
 )
@@ -199,6 +203,10 @@ def _run_native_batch_report(
         float
     ] = []
 
+    resource_started = (
+        capture_process_resource_snapshot()
+    )
+
     measurement_started = (
         perf_counter_ns()
     )
@@ -215,10 +223,29 @@ def _run_native_batch_report(
                 )
             )
 
-    elapsed_seconds = (
+    measurement_ended = (
         perf_counter_ns()
+    )
+
+    resource_ended = (
+        capture_process_resource_snapshot()
+    )
+
+    elapsed_seconds = (
+        measurement_ended
         - measurement_started
     ) / 1_000_000_000
+
+    resources = (
+        build_process_resource_evidence(
+            started=resource_started,
+            ended=resource_ended,
+            elapsed_seconds=elapsed_seconds,
+            measurement_scope=(
+                "controlled-native-batch-measured-region"
+            ),
+        )
+    )
 
     batch_invocations_per_round = len(
         batches
@@ -326,6 +353,7 @@ def _run_native_batch_report(
             ),
             throughput=throughput,
             cold_start_latency_ms=None,
+            resources=resources,
             environment=environment,
             evidence_metadata=metadata,
         )

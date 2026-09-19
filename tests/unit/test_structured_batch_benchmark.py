@@ -182,6 +182,33 @@ def test_native_batch_series_records_scaling_evidence() -> None:
         is not None
     )
 
+    assert report.resources is not None
+
+    assert (
+        report.resources.measurement_scope
+        == "controlled-native-batch-measured-region"
+    )
+
+    assert (
+        report.resources.wall_time_ms
+        > 0.0
+    )
+
+    assert (
+        report.resources.process_cpu_time_ms
+        >= 0.0
+    )
+
+    assert (
+        series.repeatability.resource_observations
+        == 1
+    )
+
+    assert (
+        series.repeatability.mean_process_cpu_time_ms
+        is not None
+    )
+
     assert set(
         observed_batch_sizes
     ) == {

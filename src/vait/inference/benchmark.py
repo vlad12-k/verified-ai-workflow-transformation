@@ -26,9 +26,14 @@ from vait.inference.models import (
     InferenceConfiguration,
     InferenceEnvironment,
     InferenceLatencySummary,
+    InferenceResourceEvidence,
     InferenceSetupEvidence,
     InferenceThroughputSummary,
     InferenceWorkload,
+)
+from vait.inference.profiling import (
+    build_process_resource_evidence,
+    capture_process_resource_snapshot,
 )
 from vait.runners.base import ImplementationRunner
 
@@ -167,6 +172,7 @@ def build_inference_benchmark_report(
     throughput: InferenceThroughputSummary,
     cold_start_latency_ms: float | None = None,
     generative: GenerativeInferenceSummary | None = None,
+    resources: InferenceResourceEvidence | None = None,
     environment: InferenceEnvironment | None = None,
     evidence_metadata: Mapping[str, JsonValue] | None = None,
 ) -> InferenceBenchmarkReport:
@@ -187,6 +193,7 @@ def build_inference_benchmark_report(
         latency=latency,
         throughput=throughput,
         generative=generative,
+        resources=resources,
         environment=environment or capture_inference_environment(),
         evidence_metadata=dict(evidence_metadata or {}),
     )
@@ -236,6 +243,9 @@ def run_controlled_inference_benchmark(
 
     latency_samples_ms: list[float] = []
 
+    resource_started = (
+        capture_process_resource_snapshot()
+    )
     measurement_started = perf_counter_ns()
 
     for _ in range(measured_rounds):
@@ -248,9 +258,23 @@ def run_controlled_inference_benchmark(
                 )
             )
 
+    measurement_ended = perf_counter_ns()
+    resource_ended = (
+        capture_process_resource_snapshot()
+    )
+
     elapsed_seconds = (
-        perf_counter_ns() - measurement_started
+        measurement_ended - measurement_started
     ) / 1_000_000_000
+
+    resources = build_process_resource_evidence(
+        started=resource_started,
+        ended=resource_ended,
+        elapsed_seconds=elapsed_seconds,
+        measurement_scope=(
+            "controlled-inference-measured-region"
+        ),
+    )
 
     measured_executions = len(latency_samples_ms)
 
@@ -282,6 +306,7 @@ def run_controlled_inference_benchmark(
         latency_samples_ms=latency_samples_ms,
         throughput=throughput,
         cold_start_latency_ms=cold_start_latency_ms,
+        resources=resources,
         environment=environment,
         evidence_metadata=metadata,
     )
@@ -314,6 +339,9 @@ def run_controlled_generative_benchmark(
     samples: list[GenerativeInferenceSample] = []
     latency_samples_ms: list[float] = []
 
+    resource_started = (
+        capture_process_resource_snapshot()
+    )
     measurement_started = perf_counter_ns()
 
     for _ in range(measured_iterations):
@@ -326,9 +354,23 @@ def run_controlled_generative_benchmark(
         samples.append(sample)
         latency_samples_ms.append(elapsed_ms)
 
+    measurement_ended = perf_counter_ns()
+    resource_ended = (
+        capture_process_resource_snapshot()
+    )
+
     elapsed_seconds = (
-        perf_counter_ns() - measurement_started
+        measurement_ended - measurement_started
     ) / 1_000_000_000
+
+    resources = build_process_resource_evidence(
+        started=resource_started,
+        ended=resource_ended,
+        elapsed_seconds=elapsed_seconds,
+        measurement_scope=(
+            "controlled-generative-measured-region"
+        ),
+    )
 
     generative = summarize_generative_samples(samples)
 
@@ -374,6 +416,7 @@ def run_controlled_generative_benchmark(
         latency_samples_ms=latency_samples_ms,
         throughput=throughput,
         generative=generative,
+        resources=resources,
         environment=environment,
         evidence_metadata=metadata,
     )

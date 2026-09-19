@@ -15,6 +15,7 @@ from vait.inference.models import (
     InferenceConfiguration,
     InferenceEnvironment,
     InferenceLatencySummary,
+    InferenceResourceEvidence,
     InferenceThroughputSummary,
 )
 from vait.optimisation.admissibility import (
@@ -283,6 +284,7 @@ def build_report(
     p99_ms: float,
     max_ms: float,
     cases_per_second: float,
+    resources: InferenceResourceEvidence | None = None,
 ) -> InferenceBenchmarkReport:
     """Build deterministic synthetic benchmark evidence."""
     return InferenceBenchmarkReport(
@@ -321,6 +323,7 @@ def build_report(
                 cases_per_second
             ),
         ),
+        resources=resources,
         environment=InferenceEnvironment(
             python_version="3.12.0",
             platform="test-platform",

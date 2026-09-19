@@ -222,6 +222,15 @@ def test_controlled_benchmark_runs_warmup_and_measured_rounds() -> None:
     assert report.throughput.cases_per_second is not None
     assert report.throughput.cases_per_second > 0.0
     assert report.throughput.requests_per_second is not None
+
+    assert report.resources is not None
+    assert (
+        report.resources.measurement_scope
+        == "controlled-inference-measured-region"
+    )
+    assert report.resources.wall_time_ms > 0.0
+    assert report.resources.process_cpu_time_ms >= 0.0
+
     assert report.evidence_metadata["case_count"] == 2
     assert report.evidence_metadata["warmup_rounds"] == 2
     assert report.evidence_metadata["measured_rounds"] == 3
@@ -467,6 +476,14 @@ def test_controlled_generative_benchmark_tracks_usage_and_throughput() -> None:
     assert report.throughput.requests_per_second > 0.0
     assert report.throughput.tokens_per_second is not None
     assert report.throughput.tokens_per_second > 0.0
+
+    assert report.resources is not None
+    assert (
+        report.resources.measurement_scope
+        == "controlled-generative-measured-region"
+    )
+    assert report.resources.wall_time_ms > 0.0
+    assert report.resources.process_cpu_time_ms >= 0.0
 
     assert (
         report.evidence_metadata["measurement_scope"]

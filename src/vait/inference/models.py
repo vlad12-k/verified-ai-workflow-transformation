@@ -114,6 +114,43 @@ class GenerativeInferenceSummary(BaseModel):
     output_tokens: int = Field(ge=0)
 
 
+class InferenceResourceEvidence(BaseModel):
+    """Process resource evidence for one controlled measurement interval."""
+
+    measurement_scope: str = Field(min_length=1)
+
+    wall_time_ms: float = Field(
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+    process_cpu_time_ms: float = Field(
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+    cpu_time_to_wall_time_ratio: float | None = Field(
+        default=None,
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+
+    process_peak_rss_baseline_bytes: int | None = Field(
+        default=None,
+        ge=0,
+    )
+    process_peak_rss_bytes: int | None = Field(
+        default=None,
+        ge=0,
+    )
+    process_peak_rss_growth_bytes: int | None = Field(
+        default=None,
+        ge=0,
+    )
+
+    peak_rss_scope: str = (
+        "process-lifetime-high-water-mark"
+    )
+
+
 class InferenceEnvironment(BaseModel):
     """Environment metadata required to interpret inference measurements."""
 
@@ -166,6 +203,7 @@ class InferenceBenchmarkReport(BaseModel):
     throughput: InferenceThroughputSummary
 
     generative: GenerativeInferenceSummary | None = None
+    resources: InferenceResourceEvidence | None = None
     environment: InferenceEnvironment
 
     evidence_metadata: dict[str, JsonValue] = Field(default_factory=dict)
