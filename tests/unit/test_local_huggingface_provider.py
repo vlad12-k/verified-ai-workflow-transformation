@@ -19,6 +19,8 @@ class FakeTokenizer:
     """Minimal deterministic tokenizer double."""
 
     eos_token_id = 99
+    pad_token_id = 99
+    padding_side = "right"
 
     def __init__(self) -> None:
         """Track rendered messages."""
@@ -41,21 +43,60 @@ class FakeTokenizer:
 
     def __call__(
         self,
-        prompt: str,
+        prompt: str | list[str],
         *,
         return_tensors: str,
+        padding: bool = False,
     ) -> dict[str, torch.Tensor]:
-        """Return three deterministic prompt tokens."""
-        assert prompt == "portable prompt"
+        """Return deterministic single or batch prompt tokens."""
         assert return_tensors == "pt"
+
+        if isinstance(
+            prompt,
+            str,
+        ):
+            assert prompt == "portable prompt"
+            assert padding is False
+
+            return {
+                "input_ids": torch.tensor(
+                    [[1, 2, 3]],
+                    dtype=torch.long,
+                ),
+                "attention_mask": torch.tensor(
+                    [[1, 1, 1]],
+                    dtype=torch.long,
+                ),
+            }
+
+        assert prompt
+        assert all(
+            item == "portable prompt"
+            for item in prompt
+        )
+        assert padding is True
+
+        batch_size = len(
+            prompt
+        )
 
         return {
             "input_ids": torch.tensor(
-                [[1, 2, 3]],
+                [
+                    [1, 2, 3]
+                    for _ in range(
+                        batch_size
+                    )
+                ],
                 dtype=torch.long,
             ),
             "attention_mask": torch.tensor(
-                [[1, 1, 1]],
+                [
+                    [1, 1, 1]
+                    for _ in range(
+                        batch_size
+                    )
+                ],
                 dtype=torch.long,
             ),
         }
@@ -86,6 +127,7 @@ class FakeModel:
         self.device = "unconfigured"
         self.eval_called = False
         self.generate_kwargs: dict[str, Any] | None = None
+        self.generate_call_count = 0
 
     def to(
         self,
@@ -106,14 +148,24 @@ class FakeModel:
     ) -> torch.Tensor:
         """Append two generated token IDs or raise the configured failure."""
         self.generate_kwargs = kwargs
+        self.generate_call_count += 1
 
         if self.error is not None:
             raise self.error
 
         input_ids = kwargs["input_ids"]
 
+        batch_size = int(
+            input_ids.shape[0]
+        )
+
         generated = torch.tensor(
-            [[7, 8]],
+            [
+                [7, 8]
+                for _ in range(
+                    batch_size
+                )
+            ],
             dtype=torch.long,
             device=input_ids.device,
         )
@@ -327,3 +379,340 @@ def test_local_provider_rejects_model_mismatch_without_generation(
     assert response.error.error_type == "model_mismatch"
 
     assert model.generate_kwargs is None
+
+
+def test_local_provider_executes_one_genuine_native_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Native batching must use exactly one model.generate invocation."""
+    tokenizer = FakeTokenizer()
+    model = FakeModel()
+
+    patch_loading(
+        monkeypatch,
+        tokenizer=tokenizer,
+        model=model,
+    )
+
+    provider = LocalHuggingFaceProvider(
+        model_id="example/model",
+        revision="abc123",
+        device="cpu",
+        local_files_only=True,
+    )
+
+    requests = (
+        build_request(),
+        build_request().model_copy(
+            update={
+                "request_id": "request-2",
+            }
+        ),
+    )
+
+    responses = provider.generate_batch(
+        requests
+    )
+
+    assert len(
+        responses
+    ) == 2
+
+    assert (
+        model.generate_call_count
+        == 1
+    )
+
+    assert (
+        tokenizer.padding_side
+        == "left"
+    )
+
+    assert [
+        response.request_id
+        for response
+        in responses
+    ] == [
+        "request-1",
+        "request-2",
+    ]
+
+    assert all(
+        response.succeeded
+        for response
+        in responses
+    )
+
+    assert all(
+        response.output_text
+        == "verified response"
+        for response
+        in responses
+    )
+
+    assert all(
+        response.usage
+        is not None
+        for response
+        in responses
+    )
+
+    assert [
+        response.usage.input_tokens
+        if response.usage
+        is not None
+        else None
+        for response
+        in responses
+    ] == [
+        3,
+        3,
+    ]
+
+    assert [
+        response.usage.output_tokens
+        if response.usage
+        is not None
+        else None
+        for response
+        in responses
+    ] == [
+        2,
+        2,
+    ]
+
+    assert all(
+        response.metadata[
+            "execution_mode"
+        ]
+        == "native-batch"
+        for response
+        in responses
+    )
+
+    assert all(
+        response.metadata[
+            "native_batch_size"
+        ]
+        == 2
+        for response
+        in responses
+    )
+
+    assert model.generate_kwargs is not None
+
+    assert (
+        model.generate_kwargs[
+            "input_ids"
+        ].shape[0]
+        == 2
+    )
+
+
+def test_local_provider_rejects_empty_native_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty batch is an invalid provider invocation."""
+    tokenizer = FakeTokenizer()
+    model = FakeModel()
+
+    patch_loading(
+        monkeypatch,
+        tokenizer=tokenizer,
+        model=model,
+    )
+
+    provider = LocalHuggingFaceProvider(
+        model_id="example/model",
+        revision="abc123",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="At least one provider request",
+    ):
+        provider.generate_batch(
+            ()
+        )
+
+    assert (
+        model.generate_call_count
+        == 0
+    )
+
+
+def test_local_provider_rejects_incompatible_native_batch_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One native generation call requires homogeneous generation settings."""
+    tokenizer = FakeTokenizer()
+    model = FakeModel()
+
+    patch_loading(
+        monkeypatch,
+        tokenizer=tokenizer,
+        model=model,
+    )
+
+    provider = LocalHuggingFaceProvider(
+        model_id="example/model",
+        revision="abc123",
+    )
+
+    requests = (
+        build_request(),
+        build_request().model_copy(
+            update={
+                "request_id": "request-2",
+                "max_output_tokens": 32,
+            }
+        ),
+    )
+
+    responses = provider.generate_batch(
+        requests
+    )
+
+    assert (
+        model.generate_call_count
+        == 0
+    )
+
+    assert len(
+        responses
+    ) == 2
+
+    assert all(
+        not response.succeeded
+        for response
+        in responses
+    )
+
+    assert all(
+        response.error
+        is not None
+        for response
+        in responses
+    )
+
+    assert all(
+        response.error.error_type
+        == "batch_configuration_mismatch"
+        for response
+        in responses
+        if response.error
+        is not None
+    )
+
+
+def test_local_provider_normalises_native_batch_generation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One backend batch failure must become per-request error evidence."""
+    tokenizer = FakeTokenizer()
+
+    model = FakeModel(
+        error=RuntimeError(
+            "native batch generation failed"
+        ),
+    )
+
+    patch_loading(
+        monkeypatch,
+        tokenizer=tokenizer,
+        model=model,
+    )
+
+    provider = LocalHuggingFaceProvider(
+        model_id="example/model",
+        revision="abc123",
+    )
+
+    responses = provider.generate_batch(
+        (
+            build_request(),
+            build_request().model_copy(
+                update={
+                    "request_id": "request-2",
+                }
+            ),
+        )
+    )
+
+    assert (
+        model.generate_call_count
+        == 1
+    )
+
+    assert len(
+        responses
+    ) == 2
+
+    assert all(
+        not response.succeeded
+        for response
+        in responses
+    )
+
+    assert all(
+        response.error
+        is not None
+        and response.error.error_type
+        == "RuntimeError"
+        and response.error.message
+        == "native batch generation failed"
+        for response
+        in responses
+    )
+
+
+def test_local_provider_native_batch_rejects_model_mismatch_without_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mixed-model batch must never enter the pinned local model."""
+    tokenizer = FakeTokenizer()
+    model = FakeModel()
+
+    patch_loading(
+        monkeypatch,
+        tokenizer=tokenizer,
+        model=model,
+    )
+
+    provider = LocalHuggingFaceProvider(
+        model_id="example/model",
+        revision="abc123",
+    )
+
+    responses = provider.generate_batch(
+        (
+            build_request(),
+            build_request(
+                model_id="different/model"
+            ).model_copy(
+                update={
+                    "request_id": "request-2",
+                }
+            ),
+        )
+    )
+
+    assert (
+        model.generate_call_count
+        == 0
+    )
+
+    assert all(
+        not response.succeeded
+        for response
+        in responses
+    )
+
+    assert all(
+        response.error
+        is not None
+        and response.error.error_type
+        == "model_mismatch"
+        for response
+        in responses
+    )

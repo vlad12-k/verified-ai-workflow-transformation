@@ -1,5 +1,6 @@
 """Provider-neutral inference protocol."""
 
+from collections.abc import Sequence
 from typing import Protocol
 
 from vait.inference.providers.models import (
@@ -26,4 +27,23 @@ class InferenceProvider(Protocol):
         request: ProviderInferenceRequest,
     ) -> ProviderInferenceResponse:
         """Execute one provider-neutral generative inference request."""
+        ...
+
+
+class BatchInferenceProvider(
+    InferenceProvider,
+    Protocol,
+):
+    """Optional provider capability for genuine native batch inference."""
+
+    def generate_batch(
+        self,
+        requests: Sequence[
+            ProviderInferenceRequest
+        ],
+    ) -> tuple[
+        ProviderInferenceResponse,
+        ...,
+    ]:
+        """Execute one native batch of independent generative requests."""
         ...
