@@ -12,6 +12,7 @@ from vait.platform.settings import PlatformSettings
 
 # Register persistence mappings before exposing metadata to Alembic.
 import_module("vait.platform.persistence.registry_models")
+import_module("vait.platform.persistence.job_models")
 
 config = context.config
 target_metadata = Base.metadata
