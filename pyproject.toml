@@ -109,5 +109,6 @@ module = [
     "sentence_transformers.*",
     "keras.*",
     "torchao.*",
+    "bitsandbytes.*",
 ]
 ignore_missing_imports = true

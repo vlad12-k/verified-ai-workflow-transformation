@@ -5,6 +5,7 @@ from pathlib import Path
 
 import bitsandbytes as bnb
 import torch
+from bitsandbytes.nn.modules import Linear4bit
 from peft import (
     LoraConfig,
     TaskType,
@@ -83,7 +84,7 @@ linear4bit_modules = [
     for name, module in base_model.named_modules()
     if isinstance(
         module,
-        bnb.nn.Linear4bit,  # type: ignore[attr-defined]
+        Linear4bit,
     )
 ]
 
