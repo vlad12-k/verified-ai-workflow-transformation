@@ -73,6 +73,7 @@ platform = [
     "uvicorn>=0.30,<1.0",
     "sqlalchemy>=2.0,<3.0",
     "psycopg[binary]>=3.2,<4.0",
+    "alembic>=1.14,<2.0",
 ]
 
 [project.scripts]
@@ -90,6 +91,15 @@ vait = ["py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+
+# Temporary upstream compatibility filter:
+# Starlette 1.6.0 still imports the deprecated AnyIO BlockingPortal alias.
+# Upstream fix: Starlette #3497 / PR #3498.
+# Remove this filter after a released Starlette version contains that fix.
+filterwarnings = [
+    'error',
+    'ignore:The anyio[.]abc[.]BlockingPortal alias is deprecated, use anyio[.]from_thread[.]BlockingPortal instead[.]:DeprecationWarning:starlette[.]testclient',
+]
 
 [tool.ruff]
 target-version = "py312"
