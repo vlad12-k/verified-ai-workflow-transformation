@@ -7,8 +7,10 @@ from typing import Protocol
 
 from vait.platform.jobs.models import JobRecord
 from vait.platform.observability import (
+    TracingRuntime,
     bind_log_context,
     reset_log_context,
+    traced_span,
 )
 from vait.platform.persistence.engine import DatabaseRuntime
 from vait.platform.persistence.repositories.jobs import JobRepository
@@ -43,6 +45,7 @@ class WorkerService:
         executor: JobExecutor,
         worker_id: str,
         lease_seconds: int,
+        tracing_runtime: TracingRuntime | None = None,
     ) -> None:
         if not worker_id:
             raise ValueError(
@@ -58,6 +61,7 @@ class WorkerService:
         self._executor = executor
         self._worker_id = worker_id
         self._lease_seconds = lease_seconds
+        self._tracing_runtime = tracing_runtime
 
     def run_once(
         self,
@@ -97,11 +101,11 @@ class WorkerService:
             worker_id=self._worker_id,
         )
 
-        _LOGGER.info(
-            "job_claimed"
-        )
+        def execute_claimed() -> WorkerCycleResult:
+            _LOGGER.info(
+                "job_claimed"
+            )
 
-        try:
             try:
                 self._executor.execute(
                     claimed
@@ -175,6 +179,16 @@ class WorkerService:
                 claimed=True,
                 job=completed,
             )
+
+        try:
+            if self._tracing_runtime is None:
+                return execute_claimed()
+
+            with traced_span(
+                self._tracing_runtime,
+                "worker.job",
+            ):
+                return execute_claimed()
         finally:
             reset_log_context(
                 context_token

@@ -1,5 +1,6 @@
 """PostgreSQL integration tests for the M5-F worker service."""
 
+import json
 import os
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -10,11 +11,15 @@ from uuid import UUID, uuid4
 import pytest
 from alembic import command
 from alembic.config import Config
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
 from sqlalchemy import text
 
 from vait.platform.jobs import JobRecord, WorkerService
 from vait.platform.observability import (
     configure_platform_logging,
+    create_tracing_runtime,
     current_log_context,
 )
 from vait.platform.persistence.engine import (
@@ -454,3 +459,210 @@ def test_worker_failure_logs_type_without_exception_message(
 
     assert "worker execution failed" not in serialized
     assert "Traceback" not in serialized
+
+def test_worker_success_events_share_one_trace_span(
+    worker_runtime: DatabaseRuntime,
+) -> None:
+    """Successful worker lifecycle events must share one OTel span."""
+    experiment = _create_experiment(
+        worker_runtime
+    )
+    job = _create_job(
+        worker_runtime,
+        experiment_id=experiment.experiment_id,
+    )
+
+    stream = StringIO()
+    configure_platform_logging(
+        stream=stream,
+    )
+
+    exporter = InMemorySpanExporter()
+    tracing_runtime = create_tracing_runtime(
+        PlatformSettings(
+            environment="test",
+            service_name="vait-worker-test",
+        ),
+        span_exporter=exporter,
+    )
+
+    executor = SuccessfulExecutor(
+        worker_runtime
+    )
+
+    try:
+        worker = WorkerService(
+            runtime=worker_runtime,
+            executor=executor,
+            worker_id="worker-traced-success",
+            lease_seconds=60,
+            tracing_runtime=tracing_runtime,
+        )
+
+        result = worker.run_once(
+            now=datetime.now(UTC),
+        )
+
+        tracing_runtime.provider.force_flush()
+
+        assert result.job is not None
+        assert result.job.status == "SUCCEEDED"
+        assert current_log_context() == {}
+
+        spans = exporter.get_finished_spans()
+
+        assert len(spans) == 1
+        assert spans[0].name == "worker.job"
+
+        payloads = [
+            json.loads(line)
+            for line in stream.getvalue().splitlines()
+            if line
+        ]
+
+        lifecycle = [
+            payload
+            for payload in payloads
+            if payload["event"]
+            in {
+                "job_claimed",
+                "job_succeeded",
+            }
+        ]
+
+        assert len(lifecycle) == 2
+
+        trace_ids = {
+            payload["trace_id"]
+            for payload in lifecycle
+        }
+        span_ids = {
+            payload["span_id"]
+            for payload in lifecycle
+        }
+
+        assert len(trace_ids) == 1
+        assert len(span_ids) == 1
+
+        trace_id = next(iter(trace_ids))
+        span_id = next(iter(span_ids))
+
+        assert isinstance(trace_id, str)
+        assert isinstance(span_id, str)
+        assert len(trace_id) == 32
+        assert len(span_id) == 16
+        assert int(trace_id, 16) > 0
+        assert int(span_id, 16) > 0
+
+        assert len(
+            executor.observed_contexts
+        ) == 1
+
+        observed = executor.observed_contexts[0]
+
+        assert observed["trace_id"] == trace_id
+        assert observed["span_id"] == span_id
+        assert (
+            observed["experiment_id"]
+            == str(experiment.experiment_id)
+        )
+        assert (
+            observed["job_id"]
+            == str(job.job_id)
+        )
+        assert (
+            observed["worker_id"]
+            == "worker-traced-success"
+        )
+    finally:
+        tracing_runtime.shutdown()
+
+
+def test_worker_failure_events_share_one_trace_span(
+    worker_runtime: DatabaseRuntime,
+) -> None:
+    """Failed worker lifecycle events must remain trace-correlated."""
+    experiment = _create_experiment(
+        worker_runtime
+    )
+    _create_job(
+        worker_runtime,
+        experiment_id=experiment.experiment_id,
+        max_attempts=1,
+    )
+
+    stream = StringIO()
+    configure_platform_logging(
+        stream=stream,
+    )
+
+    exporter = InMemorySpanExporter()
+    tracing_runtime = create_tracing_runtime(
+        PlatformSettings(
+            environment="test",
+            service_name="vait-worker-test",
+        ),
+        span_exporter=exporter,
+    )
+
+    try:
+        worker = WorkerService(
+            runtime=worker_runtime,
+            executor=FailingExecutor(),
+            worker_id="worker-traced-failure",
+            lease_seconds=60,
+            tracing_runtime=tracing_runtime,
+        )
+
+        result = worker.run_once(
+            now=datetime.now(UTC),
+        )
+
+        tracing_runtime.provider.force_flush()
+
+        assert result.job is not None
+        assert result.job.status == "FAILED"
+        assert current_log_context() == {}
+
+        spans = exporter.get_finished_spans()
+
+        assert len(spans) == 1
+        assert spans[0].name == "worker.job"
+
+        payloads = [
+            json.loads(line)
+            for line in stream.getvalue().splitlines()
+            if line
+        ]
+
+        lifecycle = [
+            payload
+            for payload in payloads
+            if payload["event"]
+            in {
+                "job_claimed",
+                "job_execution_failed",
+                "job_failed",
+            }
+        ]
+
+        assert len(lifecycle) == 3
+
+        trace_ids = {
+            payload["trace_id"]
+            for payload in lifecycle
+        }
+        span_ids = {
+            payload["span_id"]
+            for payload in lifecycle
+        }
+
+        assert len(trace_ids) == 1
+        assert len(span_ids) == 1
+
+        serialized = stream.getvalue()
+
+        assert "worker execution failed" not in serialized
+        assert "Traceback" not in serialized
+    finally:
+        tracing_runtime.shutdown()

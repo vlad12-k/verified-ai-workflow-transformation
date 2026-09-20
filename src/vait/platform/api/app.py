@@ -18,6 +18,10 @@ from vait.platform.api.readiness import (
 )
 from vait.platform.api.routes.health import router as health_router
 from vait.platform.api.routes.meta import router as meta_router
+from vait.platform.observability import (
+    TracingRuntime,
+    create_tracing_runtime,
+)
 from vait.platform.persistence import (
     DatabaseRuntime,
     create_database_runtime,
@@ -32,9 +36,16 @@ def create_app(
         [PlatformSettings],
         DatabaseRuntime,
     ] = create_database_runtime,
+    tracing_runtime_factory: Callable[
+        [PlatformSettings],
+        TracingRuntime,
+    ] = create_tracing_runtime,
 ) -> FastAPI:
     """Create a configured VAIT FastAPI application."""
     resolved_settings = settings or PlatformSettings()
+    tracing_runtime = tracing_runtime_factory(
+        resolved_settings
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -65,6 +76,8 @@ def create_app(
             if runtime is not None:
                 runtime.dispose()
 
+            tracing_runtime.shutdown()
+
             app.state.database_runtime = None
 
     app = FastAPI(
@@ -78,11 +91,15 @@ def create_app(
         lifespan=lifespan,
     )
 
-    app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(
+        RequestContextMiddleware,
+        tracing_runtime=tracing_runtime,
+    )
     register_error_handlers(app)
 
     app.state.settings = resolved_settings
     app.state.database_runtime = None
+    app.state.tracing_runtime = tracing_runtime
     app.state.readiness_probe = (
         readiness_probe or ready_without_dependencies
     )

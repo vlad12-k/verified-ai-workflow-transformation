@@ -8,8 +8,10 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from vait.platform.observability import (
+    TracingRuntime,
     bind_log_context,
     reset_log_context,
+    traced_span,
 )
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -38,8 +40,13 @@ def _validated_correlation_id(value: str | None) -> str | None:
 class RequestContextMiddleware:
     """Attach safe request and correlation identifiers to HTTP traffic."""
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        tracing_runtime: TracingRuntime | None = None,
+    ) -> None:
         self.app = app
+        self._tracing_runtime = tracing_runtime
 
     async def __call__(
         self,
@@ -78,7 +85,7 @@ class RequestContextMiddleware:
             correlation_id=correlation_id,
         )
 
-        try:
+        async def call_application() -> None:
             try:
                 await self.app(
                     scope,
@@ -94,6 +101,16 @@ class RequestContextMiddleware:
                 _LOGGER.info(
                     "http_request_completed"
                 )
+
+        try:
+            if self._tracing_runtime is None:
+                await call_application()
+            else:
+                with traced_span(
+                    self._tracing_runtime,
+                    "http.request",
+                ):
+                    await call_application()
         finally:
             reset_log_context(
                 token
