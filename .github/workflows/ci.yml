@@ -22,12 +22,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: vait
+          POSTGRES_PASSWORD: vait-ci-password
+          POSTGRES_DB: vait_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vait -d vait_ci"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+          --health-start-period 2s
+
     env:
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
       OPENBLAS_NUM_THREADS: "1"
       VECLIB_MAXIMUM_THREADS: "1"
       NUMEXPR_NUM_THREADS: "1"
+      VAIT_TEST_DATABASE_URL: "postgresql+psycopg://vait:vait-ci-password@127.0.0.1:5432/vait_ci"
+      VAIT_TEST_MIGRATION_DATABASE_URL: "postgresql+psycopg://vait:vait-ci-password@127.0.0.1:5432/vait_ci"
+      VAIT_TEST_REGISTRY_DATABASE_URL: "postgresql+psycopg://vait:vait-ci-password@127.0.0.1:5432/vait_ci"
+      VAIT_TEST_JOBS_DATABASE_URL: "postgresql+psycopg://vait:vait-ci-password@127.0.0.1:5432/vait_ci"
 
     steps:
       - name: Check out repository
@@ -50,7 +70,7 @@ jobs:
           "torch==2.14.0+cpu"
 
       - name: Install project
-        run: python -m pip install -e ".[dev,ml,tensorflow,embeddings,slm,peft,torchao]"
+        run: python -m pip install -e ".[dev,ml,tensorflow,embeddings,slm,peft,torchao,platform]"
 
       - name: Verify CPU PyTorch
         run: >
@@ -68,6 +88,13 @@ jobs:
 
       - name: Mypy
         run: mypy src tests examples
+
+      - name: PostgreSQL migration gate
+        env:
+          VAIT_DATABASE_URL: "postgresql+psycopg://vait:vait-ci-password@127.0.0.1:5432/vait_ci"
+        run: |
+          alembic -c alembic.ini upgrade head
+          alembic -c alembic.ini check
 
       - name: Tests and coverage
         run: >
@@ -93,3 +120,109 @@ jobs:
         run: |
           python examples/analyse_m4i_multi_objective_v01.py
           python examples/build_m4j_recommendation_plan_v01.py
+
+  container-e2e:
+    name: Container E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - quality
+
+    env:
+      COMPOSE_PROJECT_NAME: vait-ci-e2e
+      VAIT_ENVIRONMENT: test
+      VAIT_SERVICE_NAME: vait-ci-e2e
+      VAIT_API_PORT: "58001"
+      VAIT_POSTGRES_PORT: "55438"
+      POSTGRES_USER: vait
+      POSTGRES_PASSWORD: vait-ci-password
+      POSTGRES_DB: vait_ci_e2e
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Validate Compose configuration
+        run: docker compose -f compose.yaml config --quiet
+
+      - name: Build and start clean stack
+        run: |
+          set -euo pipefail
+          docker compose -f compose.yaml down -v --remove-orphans
+          docker compose -f compose.yaml up -d --build
+          docker compose -f compose.yaml ps -a
+
+      - name: Verify container runtime contract
+        run: |
+          set -euo pipefail
+          IMAGE_USER="$(docker image inspect vait-platform:m5i-b --format '{{.Config.User}}')"
+          echo "image user=${IMAGE_USER}"
+          test "${IMAGE_USER}" = "65532:65532"
+
+      - name: Verify migration completion
+        run: |
+          set -euo pipefail
+          MIGRATE_ID="$(docker compose -f compose.yaml ps -a -q migrate)"
+          test -n "${MIGRATE_ID}"
+
+          STATUS="$(docker inspect --format '{{.State.Status}}' "${MIGRATE_ID}")"
+          EXIT_CODE="$(docker inspect --format '{{.State.ExitCode}}' "${MIGRATE_ID}")"
+
+          echo "migration status=${STATUS} exit=${EXIT_CODE}"
+          test "${STATUS}" = "exited"
+          test "${EXIT_CODE}" = "0"
+
+      - name: Verify API health
+        run: |
+          set -euo pipefail
+          READY=false
+
+          for attempt in {1..30}; do
+            if curl -fsS "http://127.0.0.1:${VAIT_API_PORT}/api/v1/health/ready" > /tmp/vait-ready.json; then
+              READY=true
+              break
+            fi
+
+            echo "waiting for API readiness: ${attempt}/30"
+            sleep 2
+          done
+
+          if [ "${READY}" != "true" ]; then
+            echo "API did not become ready"
+            docker compose -f compose.yaml ps -a
+            docker compose -f compose.yaml logs --no-color
+            exit 1
+          fi
+
+          cat /tmp/vait-ready.json
+          echo
+
+          grep -Fq '"status":"ready"' /tmp/vait-ready.json
+          grep -Fq '"name":"database","ready":true' /tmp/vait-ready.json
+
+          curl -fsS "http://127.0.0.1:${VAIT_API_PORT}/api/v1/health/live" > /tmp/vait-live.json
+
+          cat /tmp/vait-live.json
+          echo
+
+          grep -Fq '"status":"ok"' /tmp/vait-live.json
+
+      - name: Verify database migration head
+        run: |
+          set -euo pipefail
+
+          EXPECTED_HEAD="$(docker compose -f compose.yaml exec -T api alembic -c alembic.ini heads | awk 'NR == 1 {print $1}')"
+          ACTUAL_HEAD="$(docker compose -f compose.yaml exec -T postgres sh -lc 'psql -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT version_num FROM alembic_version;"')"
+
+          echo "expected head=${EXPECTED_HEAD}"
+          echo "database head=${ACTUAL_HEAD}"
+
+          test -n "${EXPECTED_HEAD}"
+          test "${ACTUAL_HEAD}" = "${EXPECTED_HEAD}"
+
+      - name: Show final deployment state
+        run: docker compose -f compose.yaml ps -a
+
+      - name: Clean up container E2E
+        if: always()
+        run: docker compose -f compose.yaml down -v --remove-orphans

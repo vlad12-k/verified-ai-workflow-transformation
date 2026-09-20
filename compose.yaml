@@ -1,0 +1,69 @@
+x-vait-image: &vait-image
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: vait-platform:m5i-b
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vait}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vait-local-password}
+      POSTGRES_DB: ${POSTGRES_DB:-vait}
+    ports:
+      - "127.0.0.1:${VAIT_POSTGRES_PORT:-55438}:5432"
+    volumes:
+      - vait-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
+    restart: unless-stopped
+
+  migrate:
+    <<: *vait-image
+    command:
+      - alembic
+      - -c
+      - alembic.ini
+      - upgrade
+      - head
+    environment:
+      VAIT_ENVIRONMENT: ${VAIT_ENVIRONMENT:-development}
+      VAIT_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-vait}:${POSTGRES_PASSWORD:-vait-local-password}@postgres:5432/${POSTGRES_DB:-vait}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *vait-image
+    environment:
+      VAIT_ENVIRONMENT: ${VAIT_ENVIRONMENT:-development}
+      VAIT_SERVICE_NAME: ${VAIT_SERVICE_NAME:-vait-platform}
+      VAIT_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-vait}:${POSTGRES_PASSWORD:-vait-local-password}@postgres:5432/${POSTGRES_DB:-vait}
+    ports:
+      - "127.0.0.1:${VAIT_API_PORT:-58001}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/api/v1/health/ready", timeout=2)
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+    init: true
+
+volumes:
+  vait-postgres-data:
