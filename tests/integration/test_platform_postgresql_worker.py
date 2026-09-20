@@ -3,6 +3,7 @@
 import os
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from io import StringIO
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -12,6 +13,10 @@ from alembic.config import Config
 from sqlalchemy import text
 
 from vait.platform.jobs import JobRecord, WorkerService
+from vait.platform.observability import (
+    configure_platform_logging,
+    current_log_context,
+)
 from vait.platform.persistence.engine import (
     DatabaseRuntime,
     create_database_runtime,
@@ -140,6 +145,7 @@ class SuccessfulExecutor:
         self._runtime = runtime
         self.seen_job_ids: list[UUID] = []
         self.observed_statuses: list[str] = []
+        self.observed_contexts: list[dict[str, str]] = []
 
     def execute(
         self,
@@ -148,6 +154,9 @@ class SuccessfulExecutor:
         """Verify the claim is committed before execution begins."""
         self.seen_job_ids.append(
             job.job_id
+        )
+        self.observed_contexts.append(
+            current_log_context()
         )
 
         with transactional_session(
@@ -240,6 +249,18 @@ def test_worker_commits_claim_before_execution_and_then_succeeds(
     assert executor.observed_statuses == [
         "RUNNING",
     ]
+    assert executor.observed_contexts == [
+        {
+            "experiment_id": str(
+                experiment.experiment_id
+            ),
+            "job_id": str(
+                job.job_id
+            ),
+            "worker_id": "worker-01",
+        }
+    ]
+    assert current_log_context() == {}
 
     with transactional_session(
         worker_runtime
@@ -283,6 +304,7 @@ def test_worker_failure_becomes_retry_pending_when_budget_remains(
     assert result.job.attempt == 1
     assert result.job.error_code == "RuntimeError"
     assert result.job.claimed_by is None
+    assert current_log_context() == {}
 
 
 def test_worker_failure_becomes_terminal_when_budget_is_exhausted(
@@ -316,3 +338,119 @@ def test_worker_failure_becomes_terminal_when_budget_is_exhausted(
     assert result.job.attempt == 1
     assert result.job.error_code == "RuntimeError"
     assert result.job.finished_at is not None
+    assert current_log_context() == {}
+
+def test_worker_emits_correlated_success_events(
+    worker_runtime: DatabaseRuntime,
+) -> None:
+    """Successful work must emit correlated structured lifecycle events."""
+    experiment = _create_experiment(
+        worker_runtime
+    )
+    job = _create_job(
+        worker_runtime,
+        experiment_id=experiment.experiment_id,
+    )
+
+    stream = StringIO()
+    configure_platform_logging(
+        stream=stream,
+    )
+
+    worker = WorkerService(
+        runtime=worker_runtime,
+        executor=SuccessfulExecutor(
+            worker_runtime
+        ),
+        worker_id="worker-log-success",
+        lease_seconds=60,
+    )
+
+    result = worker.run_once(
+        now=datetime.now(UTC),
+    )
+
+    assert result.job is not None
+    assert result.job.status == "SUCCEEDED"
+    assert current_log_context() == {}
+
+    serialized = stream.getvalue()
+
+    assert '"event":"job_claimed"' in serialized
+    assert '"event":"job_succeeded"' in serialized
+
+    assert (
+        f'"experiment_id":"{experiment.experiment_id}"'
+        in serialized
+    )
+    assert (
+        f'"job_id":"{job.job_id}"'
+        in serialized
+    )
+    assert (
+        '"worker_id":"worker-log-success"'
+        in serialized
+    )
+
+
+def test_worker_failure_logs_type_without_exception_message(
+    worker_runtime: DatabaseRuntime,
+) -> None:
+    """Worker failure logs must remain correlated and sanitised."""
+    experiment = _create_experiment(
+        worker_runtime
+    )
+    job = _create_job(
+        worker_runtime,
+        experiment_id=experiment.experiment_id,
+        max_attempts=1,
+    )
+
+    stream = StringIO()
+    configure_platform_logging(
+        stream=stream,
+    )
+
+    worker = WorkerService(
+        runtime=worker_runtime,
+        executor=FailingExecutor(),
+        worker_id="worker-log-failure",
+        lease_seconds=60,
+    )
+
+    result = worker.run_once(
+        now=datetime.now(UTC),
+    )
+
+    assert result.job is not None
+    assert result.job.status == "FAILED"
+    assert current_log_context() == {}
+
+    serialized = stream.getvalue()
+
+    assert '"event":"job_claimed"' in serialized
+    assert (
+        '"event":"job_execution_failed"'
+        in serialized
+    )
+    assert '"event":"job_failed"' in serialized
+    assert (
+        '"exception_type":"RuntimeError"'
+        in serialized
+    )
+
+    assert (
+        f'"experiment_id":"{experiment.experiment_id}"'
+        in serialized
+    )
+    assert (
+        f'"job_id":"{job.job_id}"'
+        in serialized
+    )
+    assert (
+        '"worker_id":"worker-log-failure"'
+        in serialized
+    )
+
+    assert "worker execution failed" not in serialized
+    assert "Traceback" not in serialized

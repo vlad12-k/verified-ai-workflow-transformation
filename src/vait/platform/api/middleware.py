@@ -1,16 +1,24 @@
 """HTTP request context middleware for the VAIT platform."""
 
+import logging
 import re
 from uuid import uuid4
 
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from vait.platform.observability import (
+    bind_log_context,
+    reset_log_context,
+)
+
 REQUEST_ID_HEADER = "X-Request-ID"
 CORRELATION_ID_HEADER = "X-Correlation-ID"
 
 _MAX_CORRELATION_ID_LENGTH = 128
 _SAFE_CORRELATION_ID = re.compile(r"^[A-Za-z0-9._:-]+$")
+
+_LOGGER = logging.getLogger("vait")
 
 
 def _validated_correlation_id(value: str | None) -> str | None:
@@ -65,4 +73,28 @@ class RequestContextMiddleware:
 
             await send(message)
 
-        await self.app(scope, receive, send_with_context)
+        token = bind_log_context(
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
+
+        try:
+            try:
+                await self.app(
+                    scope,
+                    receive,
+                    send_with_context,
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "http_request_failed"
+                )
+                raise
+            else:
+                _LOGGER.info(
+                    "http_request_completed"
+                )
+        finally:
+            reset_log_context(
+                token
+            )

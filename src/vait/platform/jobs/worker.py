@@ -1,13 +1,20 @@
 """Thin orchestration service for durable background jobs."""
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
 from vait.platform.jobs.models import JobRecord
+from vait.platform.observability import (
+    bind_log_context,
+    reset_log_context,
+)
 from vait.platform.persistence.engine import DatabaseRuntime
 from vait.platform.persistence.repositories.jobs import JobRepository
 from vait.platform.persistence.session import transactional_session
+
+_LOGGER = logging.getLogger("vait")
 
 
 class JobExecutor(Protocol):
@@ -80,54 +87,95 @@ class WorkerService:
                 job=None,
             )
 
+        context_token = bind_log_context(
+            experiment_id=str(
+                claimed.experiment_id
+            ),
+            job_id=str(
+                claimed.job_id
+            ),
+            worker_id=self._worker_id,
+        )
+
+        _LOGGER.info(
+            "job_claimed"
+        )
+
         try:
-            self._executor.execute(
-                claimed
-            )
-        except Exception as exc:
-            error_code = type(exc).__name__
+            try:
+                self._executor.execute(
+                    claimed
+                )
+            except Exception as exc:
+                error_code = type(exc).__name__
+
+                _LOGGER.exception(
+                    "job_execution_failed"
+                )
+
+                with transactional_session(
+                    self._runtime
+                ) as session:
+                    failed = JobRepository(
+                        session
+                    ).mark_failed_or_retry(
+                        job_id=claimed.job_id,
+                        worker_id=self._worker_id,
+                        now=now,
+                        error_code=error_code,
+                    )
+
+                if failed is None:
+                    raise RuntimeError(
+                        "Claimed job lost worker ownership "
+                        "before failure persistence"
+                    ) from exc
+
+                if failed.status == "RETRY_PENDING":
+                    _LOGGER.warning(
+                        "job_retry_pending"
+                    )
+                elif failed.status == "FAILED":
+                    _LOGGER.error(
+                        "job_failed"
+                    )
+                else:
+                    raise RuntimeError(
+                        "Unexpected durable job state "
+                        "after execution failure"
+                    ) from exc
+
+                return WorkerCycleResult(
+                    claimed=True,
+                    job=failed,
+                )
 
             with transactional_session(
                 self._runtime
             ) as session:
-                failed = JobRepository(
+                completed = JobRepository(
                     session
-                ).mark_failed_or_retry(
+                ).mark_succeeded(
                     job_id=claimed.job_id,
                     worker_id=self._worker_id,
                     now=now,
-                    error_code=error_code,
                 )
 
-            if failed is None:
+            if completed is None:
                 raise RuntimeError(
                     "Claimed job lost worker ownership "
-                    "before failure persistence"
-                ) from exc
+                    "before success persistence"
+                )
+
+            _LOGGER.info(
+                "job_succeeded"
+            )
 
             return WorkerCycleResult(
                 claimed=True,
-                job=failed,
+                job=completed,
             )
-
-        with transactional_session(
-            self._runtime
-        ) as session:
-            completed = JobRepository(
-                session
-            ).mark_succeeded(
-                job_id=claimed.job_id,
-                worker_id=self._worker_id,
-                now=now,
+        finally:
+            reset_log_context(
+                context_token
             )
-
-        if completed is None:
-            raise RuntimeError(
-                "Claimed job lost worker ownership "
-                "before success persistence"
-            )
-
-        return WorkerCycleResult(
-            claimed=True,
-            job=completed,
-        )
