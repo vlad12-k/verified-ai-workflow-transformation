@@ -1,6 +1,6 @@
 # M6 — Production Hardening
 
-**Status:** Active  
+**Status:** Active
 **Branch:** `feat/m6-production-hardening`
 
 ## Goal
