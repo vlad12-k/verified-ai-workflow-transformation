@@ -10,6 +10,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
 
 ErrorCode = Literal[
+    "authentication_required",
     "not_found",
     "http_error",
     "validation_error",
@@ -114,8 +115,11 @@ async def http_exception_handler(
             "http_exception_handler received a non-HTTP exception"
         )
 
-    if exc.status_code == 404:
-        code: ErrorCode = "not_found"
+    if exc.status_code == 401:
+        code: ErrorCode = "authentication_required"
+        message = "Authentication required."
+    elif exc.status_code == 404:
+        code = "not_found"
         message = "Resource not found."
     else:
         code = "http_error"
