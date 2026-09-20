@@ -1,6 +1,6 @@
 # M5 — AI Platform Engineering
 
-**Status:** In progress
+**Status:** Completed and merged into `main`
 
 ## Goal
 
@@ -319,6 +319,57 @@ M5-A is complete only when:
 9. M5 and M6 security responsibilities are explicitly separated.
 10. Focused tests, Ruff, mypy, and `git diff --check` pass.
 11. Full repository regression passes before M5-A is committed.
+
+## M5 closure and M6 carry-forward
+
+M5 achieved its core platform-engineering objective and was merged
+into `main` through PR #8.
+
+The final M5 implementation established:
+
+- the isolated `vait.platform` boundary;
+- typed platform configuration;
+- FastAPI service contracts;
+- PostgreSQL persistence;
+- Alembic migrations;
+- experiment and evidence registry contracts;
+- durable PostgreSQL-backed jobs;
+- structured logging;
+- OpenTelemetry tracing;
+- Docker and Docker Compose runtime support;
+- PostgreSQL-backed CI integration tests;
+- container end-to-end deployment evidence.
+
+The following residual operational work is explicitly carried into
+M6 rather than retroactively changing the M5 implementation history:
+
+1. **OpenTelemetry metrics**
+   - M5 established structured logging and tracing.
+   - Metrics and SLO-oriented instrumentation are completed in M6-H.
+
+2. **Deployable worker process**
+   - M5 established durable jobs, state transitions, claiming, leases,
+     retries, heartbeat semantics, and the worker service abstraction.
+   - A separately deployable worker runtime and Compose worker service
+     are completed in M6-D.
+
+3. **Full platform workflow E2E**
+   - M5 CI proves clean container bootstrap, migration completion,
+     non-root runtime, liveness, readiness, migration-head agreement,
+     and cleanup.
+   - M6-K completes the full HTTP -> experiment -> durable job ->
+     worker -> verification/evaluation -> evidence persistence ->
+     result retrieval path.
+
+4. **Documentation and release-state alignment**
+   - M5 implementation and post-merge CI evidence are complete.
+   - M6-0 records the carried-forward work and establishes the
+     authoritative M6 hardening roadmap.
+
+These carried-forward items do not alter M5 verification semantics or
+the architectural invariant:
+
+`VERIFY FIRST -> OPTIMISE SECOND`
 
 ## M5 non-goals
 
