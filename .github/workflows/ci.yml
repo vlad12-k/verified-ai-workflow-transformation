@@ -44,8 +44,6 @@ jobs:
       OPENBLAS_NUM_THREADS: "1"
       VECLIB_MAXIMUM_THREADS: "1"
       NUMEXPR_NUM_THREADS: "1"
-      VAIT_ENVIRONMENT: "test"
-      VAIT_DATABASE_URL: "postgresql+psycopg://vait:vait-ci-password@127.0.0.1:5432/vait_ci"
       VAIT_TEST_DATABASE_URL: "postgresql+psycopg://vait:vait-ci-password@127.0.0.1:5432/vait_ci"
       VAIT_TEST_MIGRATION_DATABASE_URL: "postgresql+psycopg://vait:vait-ci-password@127.0.0.1:5432/vait_ci"
       VAIT_TEST_REGISTRY_DATABASE_URL: "postgresql+psycopg://vait:vait-ci-password@127.0.0.1:5432/vait_ci"
@@ -92,6 +90,8 @@ jobs:
         run: mypy src tests examples
 
       - name: PostgreSQL migration gate
+        env:
+          VAIT_DATABASE_URL: "postgresql+psycopg://vait:vait-ci-password@127.0.0.1:5432/vait_ci"
         run: |
           alembic -c alembic.ini upgrade head
           alembic -c alembic.ini check
