@@ -212,3 +212,77 @@ def test_auth_principal_rejects_unsafe_characters() -> None:
             auth_token=SecretStr("a" * 32),
             auth_principal="unsafe principal",
         )
+
+
+def test_authorization_role_defaults_to_viewer() -> None:
+    """Authentication must default to the least-privileged platform role."""
+    settings = PlatformSettings()
+
+    assert settings.auth_role == "viewer"
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        "viewer",
+        "operator",
+        "admin",
+    ],
+)
+def test_service_token_accepts_supported_authorization_roles(
+    role: str,
+) -> None:
+    """Authenticated services may receive only declared platform roles."""
+    settings = PlatformSettings(
+        authentication_mode="service_token",
+        auth_token=SecretStr("a" * 32),
+        auth_role=role,  # type: ignore[arg-type]
+    )
+
+    assert settings.auth_role == role
+
+
+def test_disabled_authentication_rejects_elevated_role() -> None:
+    """Dormant elevated authority must not exist behind disabled auth."""
+    with pytest.raises(
+        ValidationError,
+        match="elevated auth_role must not be configured",
+    ):
+        PlatformSettings(
+            authentication_mode="disabled",
+            auth_role="admin",
+        )
+
+
+def test_auth_role_reads_prefixed_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """VAIT_AUTH_ROLE must pass through typed settings validation."""
+    monkeypatch.setenv(
+        "VAIT_AUTHENTICATION_MODE",
+        "service_token",
+    )
+    monkeypatch.setenv(
+        "VAIT_AUTH_TOKEN",
+        "environment-service-token-123456789",
+    )
+    monkeypatch.setenv(
+        "VAIT_AUTH_ROLE",
+        "operator",
+    )
+
+    settings = PlatformSettings()
+
+    assert settings.auth_role == "operator"
+
+
+def test_unknown_authorization_role_is_rejected() -> None:
+    """Configuration must reject undeclared platform roles."""
+    with pytest.raises(
+        ValidationError,
+    ):
+        PlatformSettings(
+            authentication_mode="service_token",
+            auth_token=SecretStr("a" * 32),
+            auth_role="superuser",  # type: ignore[arg-type]
+        )

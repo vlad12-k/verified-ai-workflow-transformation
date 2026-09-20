@@ -7,7 +7,10 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 
-from vait.platform.settings import PlatformSettings
+from vait.platform.settings import (
+    AuthorizationRole,
+    PlatformSettings,
+)
 
 _BEARER_SCHEME = HTTPBearer(
     auto_error=False,
@@ -33,6 +36,7 @@ class AuthenticatedPrincipal(BaseModel):
     authentication_method: Literal[
         "service_token"
     ] = "service_token"
+    role: AuthorizationRole = "viewer"
 
 
 def _authentication_required() -> HTTPException:
@@ -85,4 +89,5 @@ def require_authenticated_principal(
 
     return AuthenticatedPrincipal(
         subject=settings.auth_principal,
+        role=settings.auth_role,
     )

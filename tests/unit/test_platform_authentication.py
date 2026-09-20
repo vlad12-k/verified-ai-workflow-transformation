@@ -38,6 +38,7 @@ def _protected_app(
             "authentication_method": (
                 principal.authentication_method
             ),
+            "role": principal.role,
         }
 
     app.add_api_route(
@@ -205,6 +206,7 @@ def test_valid_service_token_establishes_principal() -> None:
     assert response.json() == {
         "subject": "m6-test-service",
         "authentication_method": "service_token",
+        "role": "viewer",
     }
 
 

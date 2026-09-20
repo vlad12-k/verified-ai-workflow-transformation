@@ -17,6 +17,12 @@ AuthenticationMode = Literal[
     "service_token",
 ]
 
+AuthorizationRole = Literal[
+    "viewer",
+    "operator",
+    "admin",
+]
+
 
 class PlatformSettings(BaseSettings):
     """Platform configuration loaded from VAIT-prefixed environment variables."""
@@ -41,6 +47,7 @@ class PlatformSettings(BaseSettings):
         max_length=128,
         pattern=r"^[A-Za-z0-9._:-]+$",
     )
+    auth_role: AuthorizationRole = "viewer"
 
     @model_validator(mode="after")
     def validate_secure_defaults(self) -> Self:
@@ -80,6 +87,15 @@ class PlatformSettings(BaseSettings):
         elif self.auth_token is not None:
             raise ValueError(
                 "auth_token must not be configured when "
+                "authentication_mode is disabled"
+            )
+
+        if (
+            self.authentication_mode == "disabled"
+            and self.auth_role != "viewer"
+        ):
+            raise ValueError(
+                "elevated auth_role must not be configured when "
                 "authentication_mode is disabled"
             )
 
