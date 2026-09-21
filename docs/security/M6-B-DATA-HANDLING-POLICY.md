@@ -1,6 +1,6 @@
 # M6-B — Sensitive Data and Redaction Policy
 
-**Status:** Active
+**Status:** Completed
 **Milestone:** M6-B3
 **Threat owners:** T-05, T-06, T-15
 **Parent plan:** `docs/M6-PRODUCTION-HARDENING.md`
