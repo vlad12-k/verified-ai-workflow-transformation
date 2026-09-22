@@ -20,6 +20,9 @@ from vait.inference.providers.openai_compatible import (
 from vait.inference.providers.stdlib_http import (
     StdlibJsonTransport,
 )
+from vait.platform.security.egress import (
+    ProviderEgressPolicy,
+)
 
 
 @dataclass
@@ -133,6 +136,26 @@ def start_server(
     return server, thread
 
 
+def build_local_transport(
+    *,
+    host: str,
+    port: int,
+) -> StdlibJsonTransport:
+    """Build an explicitly allow-listed localhost test transport."""
+    policy = ProviderEgressPolicy(
+        allowed_origins=frozenset(
+            {
+                f"http://{host}:{port}",
+            }
+        ),
+        allow_non_global_addresses=True,
+    )
+
+    return StdlibJsonTransport(
+        url_validator=policy,
+    )
+
+
 def build_request() -> ProviderInferenceRequest:
     """Build one portable request for HTTP integration tests."""
     return ProviderInferenceRequest(
@@ -197,7 +220,10 @@ def test_stdlib_transport_executes_real_local_http_round_trip() -> None:
         provider = OpenAICompatibleProvider(
             base_url=f"http://{host}:{port}",
             model_id="portable-model",
-            transport=StdlibJsonTransport(),
+            transport=build_local_transport(
+                host=host,
+                port=port,
+            ),
             api_key="local-test-key",
             timeout_seconds=5.0,
         )
@@ -275,7 +301,10 @@ def test_stdlib_transport_preserves_http_error_for_provider_normalisation() -> N
         provider = OpenAICompatibleProvider(
             base_url=f"http://{host}:{port}/v1",
             model_id="portable-model",
-            transport=StdlibJsonTransport(),
+            transport=build_local_transport(
+                host=host,
+                port=port,
+            ),
             timeout_seconds=5.0,
         )
 
