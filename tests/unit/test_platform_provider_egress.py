@@ -667,3 +667,35 @@ def test_allowlist_origin_without_hostname_is_rejected() -> None:
             ),
             resolver=FakeResolver(),
         )
+
+
+def test_policy_returns_validated_addresses_for_transport_connection() -> None:
+    """Transport must receive the exact address set approved by policy."""
+    resolver = FakeResolver(
+        addresses=(
+            "8.8.8.8",
+            "1.1.1.1",
+        )
+    )
+
+    policy = _policy(
+        resolver=resolver,
+    )
+
+    addresses = (
+        policy.resolve_validated_addresses(
+            "https://api.provider.test/v1"
+        )
+    )
+
+    assert addresses == (
+        "8.8.8.8",
+        "1.1.1.1",
+    )
+
+    assert resolver.calls == [
+        (
+            "api.provider.test",
+            443,
+        )
+    ]

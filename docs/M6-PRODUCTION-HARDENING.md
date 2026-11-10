@@ -443,6 +443,20 @@ M4 already established:
 
 M6-J adds the concrete live transport and external-service evidence.
 
+The M6-B4 address-pinned `StdlibJsonTransport` is a tested security primitive,
+not evidence that production provider traffic already uses it. M6-J2 must wire
+the concrete provider transport through this primitive and retain its egress,
+TLS, redirect, and request-budget tests before any live canary.
+
+The transport's monotonic request budget covers policy checks, approved-address
+connection attempts, TCP, TLS, request writes, and HTTP response status, headers,
+and body reads. Operating-system DNS resolution remains synchronous and cannot
+be interrupted by `socket.getaddrinfo`; time spent resolving consumes the budget
+and is rejected immediately after the lookup returns if expired, but a blocked
+resolver can still make elapsed time exceed the configured budget. A strict
+DNS-inclusive deadline requires a resolver with native bounded/cancellable
+queries; cancelling a Python future around `getaddrinfo` is not sufficient.
+
 ### M6-J sequence
 
     M6-A -> M6-I local hardening

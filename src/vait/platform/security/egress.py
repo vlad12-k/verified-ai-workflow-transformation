@@ -115,6 +115,15 @@ class ProviderEgressPolicy:
         url: str,
     ) -> None:
         """Reject an outbound URL unless every egress control passes."""
+        self.resolve_validated_addresses(
+            url
+        )
+
+    def resolve_validated_addresses(
+        self,
+        url: str,
+    ) -> tuple[str, ...]:
+        """Validate one provider URL and return its approved IP addresses."""
         parts = _split_runtime_url(
             url
         )
@@ -178,6 +187,8 @@ class ProviderEgressPolicy:
                 "resolution_failed"
             )
 
+        validated_addresses: list[str] = []
+
         for raw_address in addresses:
             try:
                 address = ip_address(
@@ -195,6 +206,14 @@ class ProviderEgressPolicy:
                 raise ProviderEgressDenied(
                     "non_global_address"
                 )
+
+            validated_addresses.append(
+                address.compressed
+            )
+
+        return tuple(
+            validated_addresses
+        )
 
     def _resolve_addresses(
         self,
