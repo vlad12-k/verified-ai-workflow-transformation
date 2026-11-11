@@ -42,6 +42,11 @@ _ALEMBIC_INI = _ROOT / "alembic.ini"
 _EXPECTED_REVISION = "0004_m6c2_budget_ledger"
 
 
+def _is_explicit_test_database(database_name: str) -> bool:
+    """Allow only databases with an explicit test or CI suffix."""
+    return database_name.endswith(("_test", "_ci"))
+
+
 def _is_allowed_test_database_server(
     database_url: str,
     server_address: str | None,
@@ -76,6 +81,7 @@ def _is_allowed_test_database_server(
         ("postgresql+psycopg://postgres@/vait_test", None, False, True),
         ("postgresql+psycopg://postgres@127.0.0.1/vait_test", "127.0.0.1", False, True),
         ("postgresql+psycopg://postgres@127.0.0.1/vait_ci", "172.18.0.2", True, True),
+        ("postgresql+psycopg://postgres@127.0.0.1/vait_ci", "172.18.0.2/32", True, False),
         ("postgresql+psycopg://postgres@10.0.0.2/vait_ci", "172.18.0.2", True, False),
         ("postgresql+psycopg://postgres@127.0.0.1/vait_test", "172.18.0.2", False, False),
         ("postgresql+psycopg://postgres@127.0.0.1/vait_ci", "8.8.8.8", True, False),
@@ -99,6 +105,21 @@ def test_database_server_address_isolation(
     )
 
 
+@pytest.mark.parametrize(
+    ("database_name", "allowed"),
+    [
+        ("vait_test", True),
+        ("vait_ci", True),
+        ("vait_production", False),
+        ("postgres", False),
+        ("vait_staging", False),
+    ],
+)
+def test_database_name_isolation(database_name: str, allowed: bool) -> None:
+    """Reject ordinary production and non-test database names before migration."""
+    assert _is_explicit_test_database(database_name) is allowed
+
+
 @pytest.fixture
 def migrated_engine(monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
     """Apply the repository migration history to an explicitly named test DB."""
@@ -113,7 +134,7 @@ def migrated_engine(monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
             identity = connection.execute(
                 text(
                     "SELECT current_database(), current_setting('server_encoding'), "
-                    "current_setting('client_encoding'), inet_server_addr()::text"
+                    "current_setting('client_encoding'), host(inet_server_addr())"
                 )
             ).one()
             connection.rollback()
@@ -121,7 +142,7 @@ def migrated_engine(monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
         probe_engine.dispose()
 
     database_name, server_encoding, client_encoding, server_address = identity
-    if not str(database_name).endswith(("_test", "_ci")):
+    if not _is_explicit_test_database(str(database_name)):
         pytest.fail("Budget-ledger tests require an explicitly named test database")
     if server_encoding != "UTF8" or client_encoding != "UTF8":
         pytest.fail("Budget-ledger tests require UTF-8 server and client encodings")
@@ -139,6 +160,38 @@ def migrated_engine(monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
         yield engine
     finally:
         engine.dispose()
+
+
+def test_ci_server_address_extraction_normalizes_cidr(
+    migrated_engine: Engine,
+) -> None:
+    """Strip the service CIDR suffix before applying the private-address guard."""
+    cidr_address = "172.18.0.2/32"
+    with migrated_engine.connect() as connection:
+        raw_address = connection.scalar(
+            text("SELECT CAST(:server_address AS inet)::text"),
+            {"server_address": cidr_address},
+        )
+        normalized_address = connection.scalar(
+            text("SELECT host(CAST(:server_address AS inet))"),
+            {"server_address": cidr_address},
+        )
+        actual_server_address = connection.scalar(text("SELECT host(inet_server_addr())"))
+
+    database_url = "postgresql+psycopg://postgres@127.0.0.1:5432/vait_ci"
+    assert raw_address == cidr_address
+    assert normalized_address == "172.18.0.2"
+    assert actual_server_address is None or "/" not in actual_server_address
+    assert not _is_allowed_test_database_server(
+        database_url,
+        raw_address,
+        github_actions=True,
+    )
+    assert _is_allowed_test_database_server(
+        database_url,
+        normalized_address,
+        github_actions=True,
+    )
 
 
 def test_migration_installs_the_budget_ledger_schema(

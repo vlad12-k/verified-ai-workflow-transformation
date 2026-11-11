@@ -17,6 +17,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from test_platform_postgresql_budget_ledger import (
     _is_allowed_test_database_server,
+    _is_explicit_test_database,
     _policy,
     _request,
 )
@@ -52,7 +53,7 @@ def migrated_engine(monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
             identity = connection.execute(
                 text(
                     "SELECT current_database(), current_setting('server_encoding'), "
-                    "current_setting('client_encoding'), inet_server_addr()::text"
+                    "current_setting('client_encoding'), host(inet_server_addr())"
                 )
             ).one()
             connection.rollback()
@@ -60,7 +61,7 @@ def migrated_engine(monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
         probe_engine.dispose()
 
     database_name, server_encoding, client_encoding, server_address = identity
-    if not str(database_name).endswith(("_test", "_ci")):
+    if not _is_explicit_test_database(str(database_name)):
         pytest.fail("Budget-ledger tests require an explicitly named test database")
     if server_encoding != "UTF8" or client_encoding != "UTF8":
         pytest.fail("Budget-ledger tests require UTF-8 server and client encodings")
