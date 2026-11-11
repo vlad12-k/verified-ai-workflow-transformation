@@ -486,8 +486,13 @@ class PostgreSQLBudgetReservationLedger:
 
         self._lock_reservation_scopes(validated_settlement.reservation_id)
         consumption = validated_settlement.consumption
+
+        # Read database time before changing ORM state to avoid
+        # autoflushing an incomplete settled reservation.
+        settled_at = _database_timestamp(self._session)
+
         row.state = BudgetReservationState.SETTLED.value
-        row.settled_at = _database_timestamp(self._session)
+        row.settled_at = settled_at
         row.consumption_fingerprint = consumption_fingerprint
         row.consumption_payload = consumption_payload
         row.consumed_provider_requests = consumption.provider_requests
