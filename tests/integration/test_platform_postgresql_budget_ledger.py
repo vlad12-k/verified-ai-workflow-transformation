@@ -15,7 +15,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -40,6 +40,63 @@ _DATABASE_ENV = "VAIT_TEST_DATABASE_URL"
 _ROOT = Path(__file__).resolve().parents[2]
 _ALEMBIC_INI = _ROOT / "alembic.ini"
 _EXPECTED_REVISION = "0004_m6c2_budget_ledger"
+
+
+def _is_allowed_test_database_server(
+    database_url: str,
+    server_address: str | None,
+    *,
+    github_actions: bool,
+) -> bool:
+    """Allow local PostgreSQL and loopback-connected GitHub service endpoints."""
+    if server_address is None:
+        return True
+
+    try:
+        address = ip_address(server_address)
+    except ValueError:
+        return False
+
+    if address.is_loopback:
+        return True
+    if not github_actions or not address.is_private:
+        return False
+
+    try:
+        client_address = ip_address(make_url(database_url).host or "")
+    except ValueError:
+        return False
+
+    return client_address.is_loopback
+
+
+@pytest.mark.parametrize(
+    ("database_url", "server_address", "github_actions", "allowed"),
+    [
+        ("postgresql+psycopg://postgres@/vait_test", None, False, True),
+        ("postgresql+psycopg://postgres@127.0.0.1/vait_test", "127.0.0.1", False, True),
+        ("postgresql+psycopg://postgres@127.0.0.1/vait_ci", "172.18.0.2", True, True),
+        ("postgresql+psycopg://postgres@10.0.0.2/vait_ci", "172.18.0.2", True, False),
+        ("postgresql+psycopg://postgres@127.0.0.1/vait_test", "172.18.0.2", False, False),
+        ("postgresql+psycopg://postgres@127.0.0.1/vait_ci", "8.8.8.8", True, False),
+        ("postgresql+psycopg://postgres@127.0.0.1/vait_ci", "invalid-address", True, False),
+    ],
+)
+def test_database_server_address_isolation(
+    database_url: str,
+    server_address: str | None,
+    github_actions: bool,
+    allowed: bool,
+) -> None:
+    """Only permit private service-container addresses behind a GHA loopback URL."""
+    assert (
+        _is_allowed_test_database_server(
+            database_url,
+            server_address,
+            github_actions=github_actions,
+        )
+        is allowed
+    )
 
 
 @pytest.fixture
@@ -68,13 +125,12 @@ def migrated_engine(monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
         pytest.fail("Budget-ledger tests require an explicitly named test database")
     if server_encoding != "UTF8" or client_encoding != "UTF8":
         pytest.fail("Budget-ledger tests require UTF-8 server and client encodings")
-    if server_address is not None:
-        try:
-            is_loopback = ip_address(str(server_address)).is_loopback
-        except ValueError:
-            pytest.fail("Budget-ledger tests require a local PostgreSQL server")
-        if not is_loopback:
-            pytest.fail("Budget-ledger tests require a local PostgreSQL server")
+    if not _is_allowed_test_database_server(
+        database_url,
+        str(server_address) if server_address is not None else None,
+        github_actions=os.getenv("GITHUB_ACTIONS") == "true",
+    ):
+        pytest.fail("PostgreSQL tests require a local database or isolated GitHub service")
 
     monkeypatch.setenv("VAIT_DATABASE_URL", database_url)
     command.upgrade(Config(str(_ALEMBIC_INI)), "head")

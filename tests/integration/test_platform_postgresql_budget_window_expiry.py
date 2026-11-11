@@ -6,7 +6,6 @@ import os
 from collections.abc import Iterator
 from datetime import timedelta
 from decimal import Decimal
-from ipaddress import ip_address
 from pathlib import Path
 from uuid import uuid4
 
@@ -16,7 +15,11 @@ from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
-from test_platform_postgresql_budget_ledger import _policy, _request
+from test_platform_postgresql_budget_ledger import (
+    _is_allowed_test_database_server,
+    _policy,
+    _request,
+)
 
 from vait.contracts.budgeting import (
     BudgetConsumption,
@@ -61,13 +64,12 @@ def migrated_engine(monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
         pytest.fail("Budget-ledger tests require an explicitly named test database")
     if server_encoding != "UTF8" or client_encoding != "UTF8":
         pytest.fail("Budget-ledger tests require UTF-8 server and client encodings")
-    if server_address is not None:
-        try:
-            is_loopback = ip_address(str(server_address)).is_loopback
-        except ValueError:
-            pytest.fail("Budget-ledger tests require a local PostgreSQL server")
-        if not is_loopback:
-            pytest.fail("Budget-ledger tests require a local PostgreSQL server")
+    if not _is_allowed_test_database_server(
+        database_url,
+        str(server_address) if server_address is not None else None,
+        github_actions=os.getenv("GITHUB_ACTIONS") == "true",
+    ):
+        pytest.fail("PostgreSQL tests require a local database or isolated GitHub service")
 
     monkeypatch.setenv("VAIT_DATABASE_URL", database_url)
     repository_root = Path(__file__).resolve().parents[2]
