@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
 from ipaddress import ip_address
@@ -127,7 +127,7 @@ def test_budget_ledger_migration_downgrade_upgrade_round_trip(
         command.upgrade(config, "head")
         command.check(config)
         with migrated_engine.connect() as connection:
-            revisions = connection.execute(
+            revisions: Sequence[str] = connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalars().all()
             ledger_schema = connection.execute(
