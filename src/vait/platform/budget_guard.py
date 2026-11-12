@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from vait.contracts.budgeting import (
     BudgetConsumption,
@@ -48,6 +48,7 @@ class BudgetedProviderDispatcher:
         request: ProviderInferenceRequest,
         policies: Sequence[BudgetPolicy],
         estimate: BudgetEstimate,
+        execution_id: UUID | None = None,
     ) -> ProviderInferenceResponse:
         """Reserve, dispatch, execute and settle separately."""
 
@@ -61,7 +62,7 @@ class BudgetedProviderDispatcher:
             )
 
         reservation_request = BudgetReservationRequest(
-            reservation_id=uuid4(),
+            reservation_id=execution_id if execution_id is not None else uuid4(),
             policies=tuple(policies),
             estimate=estimate,
         )
@@ -81,7 +82,10 @@ class BudgetedProviderDispatcher:
         # Transaction 2: persist dispatch BEFORE provider I/O.
         with transactional_session(self._runtime) as session:
             ledger = PostgreSQLBudgetReservationLedger(session)
-            dispatched = ledger.mark_dispatched(reservation_id)
+            dispatched = ledger.mark_dispatched(
+                reservation_id,
+                require_new_transition=True,
+            )
 
             if dispatched.state is not BudgetReservationState.DISPATCHED:
                 raise RuntimeError(

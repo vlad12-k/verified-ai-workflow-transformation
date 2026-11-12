@@ -378,7 +378,12 @@ class PostgreSQLBudgetReservationLedger:
             ),
         )
 
-    def mark_dispatched(self, reservation_id: UUID) -> BudgetReservation:
+    def mark_dispatched(
+        self,
+        reservation_id: UUID,
+        *,
+        require_new_transition: bool = False,
+    ) -> BudgetReservation:
         """Stage dispatch; the caller must commit before provider execution."""
         _assert_postgresql_read_committed(self._session)
         self._acquire_advisory_lock("reservation", str(reservation_id))
@@ -398,6 +403,10 @@ class PostgreSQLBudgetReservationLedger:
             BudgetReservationState.DISPATCHED,
             BudgetReservationState.SETTLED,
         }:
+            if require_new_transition:
+                raise BudgetReservationStateError(
+                    "Provider dispatch already claimed."
+                )
             return _reservation_from_row(row)
         if state is BudgetReservationState.RELEASED:
             raise BudgetReservationStateError(

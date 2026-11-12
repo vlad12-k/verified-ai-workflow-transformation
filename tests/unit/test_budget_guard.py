@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import cast
+from uuid import uuid4
 
 import pytest
 
@@ -76,8 +77,13 @@ class FakeLedger:
         )
 
     def mark_dispatched(
-        self, reservation_id: object
+        self,
+        reservation_id: object,
+        *,
+        require_new_transition: bool = False,
     ) -> BudgetReservation:
+        if not require_new_transition:
+            raise AssertionError("Strict dispatch claim required")
         self.events.append("dispatch")
         if self.fail_at == "dispatch":
             raise RuntimeError("dispatch failed")
@@ -325,3 +331,31 @@ def test_dispatch_commit_failure_blocks_provider(
         "commit",
         "rollback",
     ]
+
+
+def test_stable_execution_identity_is_reserved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dispatcher, _, ledger, events = make_harness(monkeypatch)
+    request, policies, estimate = input_data()
+    execution_id = uuid4()
+    observed: list[object] = []
+    original_reserve = ledger.reserve
+
+    def capture_reserve(
+        reservation: BudgetReservationRequest,
+    ) -> BudgetReservation:
+        observed.append(reservation.reservation_id)
+        return original_reserve(reservation)
+
+    monkeypatch.setattr(ledger, "reserve", capture_reserve)
+
+    dispatcher.execute(
+        request=request,
+        policies=policies,
+        estimate=estimate,
+        execution_id=execution_id,
+    )
+
+    assert observed == [execution_id]
+    assert events.count("generate") == 1

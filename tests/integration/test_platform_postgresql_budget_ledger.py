@@ -1390,10 +1390,13 @@ def test_m6c3_budget_guard_committed_dispatch_and_denial(
     policy = _policy(max_requests=1)
     estimate = _request(policy=policy).estimate
 
+    execution_id = uuid4()
+
     response = dispatcher.execute(
         request=request,
         policies=(policy,),
         estimate=estimate,
+        execution_id=execution_id,
     )
 
     assert response.succeeded
@@ -1414,6 +1417,20 @@ def test_m6c3_budget_guard_committed_dispatch_and_denial(
 
     assert settled.state == "settled"
     assert settled.consumed_provider_tokens == 5
+
+    # Replaying the same execution must not call the provider again.
+    with pytest.raises(
+        RuntimeError,
+        match="Budget admission did not produce a reserved state",
+    ):
+        dispatcher.execute(
+            request=request,
+            policies=(policy,),
+            estimate=estimate,
+            execution_id=execution_id,
+        )
+
+    assert provider.calls == 1
 
     with pytest.raises(BudgetDeniedError) as captured:
         dispatcher.execute(
@@ -1564,6 +1581,8 @@ def test_m6c3_pre_dispatch_failure_can_be_safely_released(
     def fail_before_dispatch(
         self: PostgreSQLBudgetReservationLedger,
         reservation_id: UUID,
+        *,
+        require_new_transition: bool = False,
     ) -> None:
         raise RuntimeError("simulated pre-dispatch failure")
 
@@ -1621,3 +1640,275 @@ def test_m6c3_pre_dispatch_failure_can_be_safely_released(
 
     assert persisted_state == "released"
     assert provider.calls == 0
+
+
+def test_m6c31_strict_dispatch_claim_rejects_replay(
+    migrated_engine: Engine,
+) -> None:
+    """Only the first committed strict claim may authorize provider I/O."""
+    request = _request()
+
+    with Session(migrated_engine) as session:
+        PostgreSQLBudgetReservationLedger(session).reserve(request)
+        session.commit()
+
+    with Session(migrated_engine) as session:
+        first = PostgreSQLBudgetReservationLedger(session).mark_dispatched(
+            request.reservation_id,
+            require_new_transition=True,
+        )
+        session.commit()
+
+    assert first.state is BudgetReservationState.DISPATCHED
+
+    with Session(migrated_engine) as session, pytest.raises(
+        BudgetReservationStateError,
+        match="already claimed",
+    ):
+        PostgreSQLBudgetReservationLedger(session).mark_dispatched(
+            request.reservation_id,
+            require_new_transition=True,
+        )
+
+    with migrated_engine.connect() as connection:
+        state = connection.scalar(
+            text(
+                "SELECT state FROM budget_reservations "
+                "WHERE reservation_id = :reservation_id"
+            ),
+            {"reservation_id": request.reservation_id},
+        )
+
+    assert state == "dispatched"
+
+
+
+def test_m6c31_concurrent_strict_dispatch_claim(
+    migrated_engine: Engine,
+) -> None:
+    """Two concurrent claimants cannot both authorize provider I/O."""
+    request = _request()
+
+    with Session(migrated_engine) as session:
+        PostgreSQLBudgetReservationLedger(session).reserve(request)
+        session.commit()
+
+    barrier = Barrier(2)
+
+    def claim() -> str:
+        barrier.wait(timeout=10)
+
+        with Session(migrated_engine) as session:
+            session.execute(text("SET LOCAL lock_timeout = '5s'"))
+            ledger = PostgreSQLBudgetReservationLedger(session)
+            try:
+                result = ledger.mark_dispatched(
+                    request.reservation_id,
+                    require_new_transition=True,
+                )
+            except BudgetReservationStateError:
+                return "rejected"
+
+            assert result.state is BudgetReservationState.DISPATCHED
+            session.commit()
+            return "claimed"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(claim)
+        second = pool.submit(claim)
+        outcomes = sorted([
+            first.result(timeout=15),
+            second.result(timeout=15),
+        ])
+
+    assert outcomes == ["claimed", "rejected"]
+
+    with migrated_engine.connect() as connection:
+        state = connection.scalar(
+            text(
+                "SELECT state FROM budget_reservations "
+                "WHERE reservation_id = :reservation_id"
+            ),
+            {"reservation_id": request.reservation_id},
+        )
+
+    assert state == "dispatched"
+
+
+
+def test_m6c31_dispatched_crash_replay_blocks_provider(
+    migrated_engine: Engine,
+) -> None:
+    """A durable DISPATCHED reservation must not execute again."""
+    from sqlalchemy.orm import sessionmaker
+
+    from vait.inference.providers.models import (
+        InferenceMessage,
+        InferenceRole,
+        ProviderInferenceRequest,
+        ProviderInferenceResponse,
+    )
+    from vait.platform.budget_guard import BudgetedProviderDispatcher
+    from vait.platform.persistence.engine import DatabaseRuntime
+
+    policy = _policy()
+    reservation = _request(policy=policy)
+
+    with Session(migrated_engine) as session:
+        ledger = PostgreSQLBudgetReservationLedger(session)
+        ledger.reserve(reservation)
+        session.commit()
+
+    with Session(migrated_engine) as session:
+        ledger = PostgreSQLBudgetReservationLedger(session)
+        ledger.mark_dispatched(
+            reservation.reservation_id,
+            require_new_transition=True,
+        )
+        session.commit()
+
+    class NeverCalledProvider:
+        provider_id = "test-provider"
+        runtime_id = "test-runtime"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate(
+            self,
+            request: ProviderInferenceRequest,
+        ) -> ProviderInferenceResponse:
+            self.calls += 1
+            raise AssertionError("Duplicate paid provider call")
+
+    provider = NeverCalledProvider()
+
+    runtime = DatabaseRuntime(
+        engine=migrated_engine,
+        session_factory=sessionmaker(
+            bind=migrated_engine,
+            autoflush=False,
+            expire_on_commit=False,
+        ),
+    )
+
+    dispatcher = BudgetedProviderDispatcher(
+        provider=provider,
+        runtime=runtime,
+    )
+
+    request = ProviderInferenceRequest(
+        request_id="crash-replay-test",
+        model_id="test-model",
+        messages=(
+            InferenceMessage(
+                role=InferenceRole.USER,
+                content="Crash recovery test",
+            ),
+        ),
+        max_output_tokens=10,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Budget admission did not produce a reserved state",
+    ):
+        dispatcher.execute(
+            request=request,
+            policies=(policy,),
+            estimate=reservation.estimate,
+            execution_id=reservation.reservation_id,
+        )
+
+    assert provider.calls == 0
+
+    with migrated_engine.connect() as connection:
+        state = connection.scalar(
+            text(
+                "SELECT state FROM budget_reservations "
+                "WHERE reservation_id = :reservation_id"
+            ),
+            {"reservation_id": reservation.reservation_id},
+        )
+
+    assert state == "dispatched"
+
+
+
+def test_m6c33_unknown_settlement_reconciliation(
+    migrated_engine: Engine,
+) -> None:
+    """Unknown usage stays charged and reconciliation is replay-safe."""
+    request = _request()
+
+    with Session(migrated_engine) as session:
+        ledger = PostgreSQLBudgetReservationLedger(session)
+        ledger.reserve(request)
+        session.commit()
+
+    with Session(migrated_engine) as session:
+        ledger = PostgreSQLBudgetReservationLedger(session)
+        ledger.mark_dispatched(
+            request.reservation_id,
+            require_new_transition=True,
+        )
+        session.commit()
+
+    settlement = BudgetSettlement(
+        reservation_id=request.reservation_id,
+        consumption=BudgetConsumption(
+            provider_requests=1,
+            provider_attempts=1,
+            retries=0,
+            provider_tokens=None,
+            spend_usd=None,
+        ),
+    )
+
+    with Session(migrated_engine) as session:
+        first = PostgreSQLBudgetReservationLedger(session).settle(
+            settlement
+        )
+        session.commit()
+
+    with Session(migrated_engine) as session:
+        repeated = PostgreSQLBudgetReservationLedger(session).settle(
+            settlement
+        )
+        session.commit()
+
+    assert first.state is BudgetReservationState.SETTLED
+    assert repeated == first
+
+    with migrated_engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT state, consumed_provider_attempts, "
+                "consumed_provider_tokens, consumed_spend_usd "
+                "FROM budget_reservations "
+                "WHERE reservation_id = :reservation_id"
+            ),
+            {"reservation_id": request.reservation_id},
+        ).one()
+
+    assert row.state == "settled"
+    assert row.consumed_provider_attempts == 1
+    assert row.consumed_provider_tokens is None
+    assert row.consumed_spend_usd is None
+
+    with Session(migrated_engine) as session, pytest.raises(
+        BudgetReservationStateError,
+        match="already claimed",
+    ):
+        PostgreSQLBudgetReservationLedger(session).mark_dispatched(
+            request.reservation_id,
+            require_new_transition=True,
+        )
+
+    with Session(migrated_engine) as session, pytest.raises(
+        BudgetReservationStateError,
+        match="Only a reservation not yet dispatched",
+    ):
+        PostgreSQLBudgetReservationLedger(session).release(
+            request.reservation_id
+        )
