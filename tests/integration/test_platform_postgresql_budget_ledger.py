@@ -1348,7 +1348,7 @@ def test_m6c3_budget_guard_committed_dispatch_and_denial(
 
             # An independent connection must see the committed state.
             with migrated_engine.connect() as connection:
-                states = connection.execute(
+                states: Sequence[str] = connection.execute(
                     text(
                         "SELECT state FROM budget_reservations "
                         "WHERE state = 'dispatched' "
