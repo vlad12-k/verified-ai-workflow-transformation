@@ -1303,3 +1303,321 @@ def test_settlement_replaces_the_estimate_with_actual_consumption(
             _request(policy=policy, provider_tokens=1)
         )
     assert captured.value.code is BudgetDenialCode.TOKEN_LIMIT_EXCEEDED
+
+
+
+def test_m6c3_budget_guard_committed_dispatch_and_denial(
+    migrated_engine: Engine,
+) -> None:
+    """Provider I/O requires a committed dispatch and available budget."""
+    from sqlalchemy.orm import sessionmaker
+
+    from vait.inference.providers.models import (
+        InferenceMessage,
+        InferenceRole,
+        ProviderInferenceRequest,
+        ProviderInferenceResponse,
+        ProviderTiming,
+        ProviderTokenUsage,
+    )
+    from vait.platform.budget_guard import BudgetedProviderDispatcher
+    from vait.platform.persistence.engine import DatabaseRuntime
+
+    runtime = DatabaseRuntime(
+        engine=migrated_engine,
+        session_factory=sessionmaker(
+            bind=migrated_engine,
+            autoflush=False,
+            expire_on_commit=False,
+        ),
+    )
+
+    class RecordingProvider:
+        provider_id = "test-provider"
+        runtime_id = "test-runtime"
+
+        def __init__(self) -> None:
+            self.calls = 0
+            self.dispatched_states: list[str] = []
+
+        def generate(
+            self,
+            request: ProviderInferenceRequest,
+        ) -> ProviderInferenceResponse:
+            self.calls += 1
+
+            # An independent connection must see the committed state.
+            with migrated_engine.connect() as connection:
+                states = connection.execute(
+                    text(
+                        "SELECT state FROM budget_reservations "
+                        "WHERE state = 'dispatched' "
+                        "ORDER BY dispatched_at DESC LIMIT 1"
+                    )
+                ).scalars().all()
+
+            self.dispatched_states.extend(states)
+
+            return ProviderInferenceResponse(
+                request_id=request.request_id,
+                provider_id=self.provider_id,
+                runtime_id=self.runtime_id,
+                model_id=request.model_id,
+                output_text="verified",
+                usage=ProviderTokenUsage(
+                    input_tokens=2,
+                    output_tokens=3,
+                ),
+                timing=ProviderTiming(total_latency_ms=1.0),
+            )
+
+    provider = RecordingProvider()
+    dispatcher = BudgetedProviderDispatcher(
+        provider=provider,
+        runtime=runtime,
+    )
+    request = ProviderInferenceRequest(
+        request_id="m6c3-integration",
+        model_id="test-model",
+        messages=(
+            InferenceMessage(
+                role=InferenceRole.USER,
+                content="Test budget guard",
+            ),
+        ),
+        max_output_tokens=10,
+    )
+    policy = _policy(max_requests=1)
+    estimate = _request(policy=policy).estimate
+
+    response = dispatcher.execute(
+        request=request,
+        policies=(policy,),
+        estimate=estimate,
+    )
+
+    assert response.succeeded
+    assert provider.calls == 1
+    assert provider.dispatched_states == ["dispatched"]
+
+    with migrated_engine.connect() as connection:
+        settled = connection.execute(
+            text(
+                "SELECT r.state, r.consumed_provider_tokens "
+                "FROM budget_reservations AS r "
+                "JOIN budget_reservation_scopes AS s "
+                "ON r.reservation_id = s.reservation_id "
+                "WHERE s.scope_id = :scope_id"
+            ),
+            {"scope_id": policy.scope.scope_id},
+        ).one()
+
+    assert settled.state == "settled"
+    assert settled.consumed_provider_tokens == 5
+
+    with pytest.raises(BudgetDeniedError) as captured:
+        dispatcher.execute(
+            request=request,
+            policies=(policy,),
+            estimate=estimate,
+        )
+
+    assert captured.value.code is BudgetDenialCode.REQUEST_LIMIT_EXCEEDED
+    assert provider.calls == 1
+
+
+def test_m6c3_budget_guard_unknown_consumption_after_provider_exception(
+    migrated_engine: Engine,
+) -> None:
+    """A failed provider call does not silently refund unknown usage."""
+    from sqlalchemy.orm import sessionmaker
+
+    from vait.inference.providers.models import (
+        InferenceMessage,
+        InferenceRole,
+        ProviderInferenceRequest,
+        ProviderInferenceResponse,
+    )
+    from vait.platform.budget_guard import BudgetedProviderDispatcher
+    from vait.platform.persistence.engine import DatabaseRuntime
+
+    runtime = DatabaseRuntime(
+        engine=migrated_engine,
+        session_factory=sessionmaker(
+            bind=migrated_engine,
+            autoflush=False,
+            expire_on_commit=False,
+        ),
+    )
+
+    class FailingProvider:
+        provider_id = "test-provider"
+        runtime_id = "test-runtime"
+
+        def generate(
+            self,
+            request: ProviderInferenceRequest,
+        ) -> ProviderInferenceResponse:
+            raise ConnectionError("simulated provider failure")
+
+    dispatcher = BudgetedProviderDispatcher(
+        provider=FailingProvider(),
+        runtime=runtime,
+    )
+    policy = _policy()
+    request = ProviderInferenceRequest(
+        request_id="m6c3-failure",
+        model_id="test-model",
+        messages=(
+            InferenceMessage(
+                role=InferenceRole.USER,
+                content="Test unknown usage",
+            ),
+        ),
+        max_output_tokens=10,
+    )
+
+    with pytest.raises(ConnectionError, match="simulated provider failure"):
+        dispatcher.execute(
+            request=request,
+            policies=(policy,),
+            estimate=_request(policy=policy).estimate,
+        )
+
+    with migrated_engine.connect() as connection:
+        settled = connection.execute(
+            text(
+                "SELECT r.state, r.consumed_provider_tokens, "
+                "r.consumed_spend_usd "
+                "FROM budget_reservations AS r "
+                "JOIN budget_reservation_scopes AS s "
+                "ON r.reservation_id = s.reservation_id "
+                "WHERE s.scope_id = :scope_id"
+            ),
+            {"scope_id": policy.scope.scope_id},
+        ).one()
+
+    assert settled.state == "settled"
+    assert settled.consumed_provider_tokens is None
+    assert settled.consumed_spend_usd is None
+
+
+
+def test_m6c3_pre_dispatch_failure_can_be_safely_released(
+    migrated_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A known pre-dispatch failure leaves a releasable reservation."""
+    from sqlalchemy.orm import sessionmaker
+
+    from vait.inference.providers.models import (
+        InferenceMessage,
+        InferenceRole,
+        ProviderInferenceRequest,
+        ProviderInferenceResponse,
+    )
+    from vait.platform.budget_guard import BudgetedProviderDispatcher
+    from vait.platform.persistence.engine import DatabaseRuntime
+
+    runtime = DatabaseRuntime(
+        engine=migrated_engine,
+        session_factory=sessionmaker(
+            bind=migrated_engine,
+            autoflush=False,
+            expire_on_commit=False,
+        ),
+    )
+
+    class NeverCalledProvider:
+        provider_id = "test-provider"
+        runtime_id = "test-runtime"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate(
+            self,
+            request: ProviderInferenceRequest,
+        ) -> ProviderInferenceResponse:
+            self.calls += 1
+            raise AssertionError("Provider must not be called")
+
+    provider = NeverCalledProvider()
+    dispatcher = BudgetedProviderDispatcher(
+        provider=provider,
+        runtime=runtime,
+    )
+
+    policy = _policy()
+    request = ProviderInferenceRequest(
+        request_id="m6c3-pre-dispatch-failure",
+        model_id="test-model",
+        messages=(
+            InferenceMessage(
+                role=InferenceRole.USER,
+                content="Test pre-dispatch recovery",
+            ),
+        ),
+        max_output_tokens=10,
+    )
+
+    def fail_before_dispatch(
+        self: PostgreSQLBudgetReservationLedger,
+        reservation_id: UUID,
+    ) -> None:
+        raise RuntimeError("simulated pre-dispatch failure")
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(
+            PostgreSQLBudgetReservationLedger,
+            "mark_dispatched",
+            fail_before_dispatch,
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="simulated pre-dispatch failure",
+        ):
+            dispatcher.execute(
+                request=request,
+                policies=(policy,),
+                estimate=_request(policy=policy).estimate,
+            )
+
+    assert provider.calls == 0
+
+    with migrated_engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT r.reservation_id, r.state "
+                "FROM budget_reservations AS r "
+                "JOIN budget_reservation_scopes AS s "
+                "ON r.reservation_id = s.reservation_id "
+                "WHERE s.scope_id = :scope_id"
+            ),
+            {"scope_id": policy.scope.scope_id},
+        ).one()
+
+    assert row.state == "reserved"
+
+    reservation_id = UUID(str(row.reservation_id))
+
+    with Session(migrated_engine) as session:
+        released = PostgreSQLBudgetReservationLedger(
+            session
+        ).release(reservation_id)
+        session.commit()
+
+    assert released.state is BudgetReservationState.RELEASED
+
+    with migrated_engine.connect() as connection:
+        persisted_state = connection.scalar(
+            text(
+                "SELECT state FROM budget_reservations "
+                "WHERE reservation_id = :reservation_id"
+            ),
+            {"reservation_id": reservation_id},
+        )
+
+    assert persisted_state == "released"
+    assert provider.calls == 0
