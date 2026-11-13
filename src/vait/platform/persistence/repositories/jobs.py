@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from vait.platform.jobs.models import JobRecord
@@ -86,6 +86,7 @@ class JobRepository(Repository[JobRecord, UUID]):
         worker_id: str,
         now: datetime,
         lease_seconds: int,
+        allowed_operations: tuple[str, ...] | None = None,
     ) -> JobRecord | None:
         """Atomically claim the oldest eligible pending job.
 
@@ -107,6 +108,17 @@ class JobRepository(Repository[JobRecord, UUID]):
                 "lease_seconds must be positive"
             )
 
+        if allowed_operations is not None and (
+            not allowed_operations
+            or any(
+                not operation
+                or operation.strip() != operation
+                or len(operation) > 128
+                for operation in allowed_operations
+            )
+        ):
+            raise ValueError("Invalid allowed_operations")
+
         statement = (
             select(JobRow)
             .where(
@@ -122,6 +134,11 @@ class JobRepository(Repository[JobRecord, UUID]):
                 skip_locked=True,
             )
         )
+
+        if allowed_operations is not None:
+            statement = statement.where(
+                JobRow.operation.in_(allowed_operations)
+            )
 
         row = self.session.scalars(
             statement
@@ -153,6 +170,7 @@ class JobRepository(Repository[JobRecord, UUID]):
         *,
         job_id: UUID,
         worker_id: str,
+        expected_attempt: int,
         now: datetime,
         lease_seconds: int,
     ) -> JobRecord | None:
@@ -172,12 +190,17 @@ class JobRepository(Repository[JobRecord, UUID]):
                 "lease_seconds must be positive"
             )
 
+        if expected_attempt < 1:
+            raise ValueError("expected_attempt must be positive")
+
         statement = (
             select(JobRow)
             .where(
                 JobRow.job_id == job_id,
                 JobRow.status == "RUNNING",
                 JobRow.claimed_by == worker_id,
+                JobRow.attempt == expected_attempt,
+                JobRow.lease_expires_at > func.clock_timestamp(),
             )
             .with_for_update()
         )
@@ -206,6 +229,7 @@ class JobRepository(Repository[JobRecord, UUID]):
         *,
         job_id: UUID,
         worker_id: str,
+        expected_attempt: int,
         now: datetime,
     ) -> JobRecord | None:
         """Complete a running job successfully."""
@@ -214,12 +238,17 @@ class JobRepository(Repository[JobRecord, UUID]):
                 "now must be timezone-aware"
             )
 
+        if expected_attempt < 1:
+            raise ValueError("expected_attempt must be positive")
+
         statement = (
             select(JobRow)
             .where(
                 JobRow.job_id == job_id,
                 JobRow.status == "RUNNING",
                 JobRow.claimed_by == worker_id,
+                JobRow.attempt == expected_attempt,
+                JobRow.lease_expires_at > func.clock_timestamp(),
             )
             .with_for_update()
         )
@@ -243,6 +272,7 @@ class JobRepository(Repository[JobRecord, UUID]):
         *,
         job_id: UUID,
         worker_id: str,
+        expected_attempt: int,
         now: datetime,
         error_code: str,
     ) -> JobRecord | None:
@@ -257,12 +287,17 @@ class JobRepository(Repository[JobRecord, UUID]):
                 "now must be timezone-aware"
             )
 
+        if expected_attempt < 1:
+            raise ValueError("expected_attempt must be positive")
+
         statement = (
             select(JobRow)
             .where(
                 JobRow.job_id == job_id,
                 JobRow.status == "RUNNING",
                 JobRow.claimed_by == worker_id,
+                JobRow.attempt == expected_attempt,
+                JobRow.lease_expires_at > func.clock_timestamp(),
             )
             .with_for_update()
         )

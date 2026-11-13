@@ -8,6 +8,9 @@ from typing import TextIO
 from vait.platform.observability.context import (
     current_log_context,
 )
+from vait.platform.security.redaction import (
+    redact_sensitive_text,
+)
 
 _LOGGER_NAME = "vait"
 
@@ -34,7 +37,9 @@ class JsonLogFormatter(logging.Formatter):
             "timestamp": timestamp,
             "level": record.levelname,
             "logger": record.name,
-            "event": record.getMessage(),
+            "event": redact_sensitive_text(
+                record.getMessage()
+            ),
         }
 
         payload.update(

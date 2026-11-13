@@ -210,3 +210,121 @@ def test_reconfiguration_replaces_handler_instead_of_duplicating_logs() -> None:
     assert payload["event"] == "configured_once"
     assert logger.level == logging.INFO
     assert logger.propagate is False
+
+
+def test_formatted_secret_is_redacted_from_log_event() -> None:
+    """Logging interpolation must not bypass telemetry redaction."""
+    stream = StringIO()
+    logger = configure_platform_logging(
+        stream=stream,
+    )
+
+    secret = "provider-api-secret-123456"
+
+    logger.info(
+        "provider api_key=%s",
+        secret,
+    )
+
+    serialized = stream.getvalue()
+    payload = _payload(
+        stream
+    )
+
+    assert secret not in serialized
+    assert (
+        payload["event"]
+        == "provider api_key=[REDACTED]"
+    )
+
+
+def test_bearer_credential_is_redacted_from_log_event() -> None:
+    """Bearer credentials embedded in event text must be removed."""
+    stream = StringIO()
+    logger = configure_platform_logging(
+        stream=stream,
+    )
+
+    secret = "bearer-secret-token-123456"
+
+    logger.info(
+        "outbound Authorization: Bearer %s",
+        secret,
+    )
+
+    serialized = stream.getvalue()
+    payload = _payload(
+        stream
+    )
+
+    assert secret not in serialized
+    assert "[REDACTED]" in str(
+        payload["event"]
+    )
+
+
+def test_credential_uri_is_redacted_from_log_event() -> None:
+    """Connection credentials in URI userinfo must not enter logs."""
+    stream = StringIO()
+    logger = configure_platform_logging(
+        stream=stream,
+    )
+
+    password = "database-password-123"
+
+    logger.info(
+        "database target postgresql://vait:%s@db.internal/vait",
+        password,
+    )
+
+    serialized = stream.getvalue()
+    payload = _payload(
+        stream
+    )
+
+    assert password not in serialized
+    assert "[REDACTED]" in str(
+        payload["event"]
+    )
+    assert "db.internal" in str(
+        payload["event"]
+    )
+
+
+def test_exception_log_event_arguments_are_redacted() -> None:
+    """Safe exception handling must also redact formatted event arguments."""
+    stream = StringIO()
+    logger = configure_platform_logging(
+        stream=stream,
+    )
+
+    secret = "provider-secret-in-log-123"
+
+    try:
+        raise RuntimeError(
+            "internal-sensitive-exception-message"
+        )
+    except RuntimeError:
+        logger.exception(
+            "provider_failed api_key=%s",
+            secret,
+        )
+
+    serialized = stream.getvalue()
+    payload = _payload(
+        stream
+    )
+
+    assert secret not in serialized
+    assert (
+        "internal-sensitive-exception-message"
+        not in serialized
+    )
+    assert (
+        payload["event"]
+        == "provider_failed api_key=[REDACTED]"
+    )
+    assert (
+        payload["exception_type"]
+        == "RuntimeError"
+    )

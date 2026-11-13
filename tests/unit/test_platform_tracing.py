@@ -7,6 +7,7 @@ import pytest
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
+from opentelemetry.trace import StatusCode
 
 from vait.platform.observability import (
     TracingRuntime,
@@ -270,5 +271,78 @@ def test_empty_span_name_is_rejected() -> None:
             ),
         ):
             pass
+    finally:
+        runtime.shutdown()
+
+
+def test_exception_secret_is_not_exported_in_span_telemetry() -> None:
+    """Exception content must not leak through exported span telemetry."""
+    exporter = InMemorySpanExporter()
+    runtime = _runtime(
+        exporter
+    )
+
+    secret = "provider-secret-must-not-enter-span"
+
+    try:
+        with (
+            pytest.raises(
+                RuntimeError,
+                match="provider-secret",
+            ),
+            traced_span(
+                runtime,
+                "security.failure",
+            ),
+        ):
+            raise RuntimeError(
+                f"provider-secret={secret}"
+            )
+
+        runtime.provider.force_flush()
+
+        spans = exporter.get_finished_spans()
+
+        assert len(spans) == 1
+
+        span = spans[0]
+
+        assert (
+            span.status.status_code
+            == StatusCode.ERROR
+        )
+        assert (
+            span.status.description
+            == "operation failed"
+        )
+
+        exported = repr(
+            {
+                "attributes": dict(
+                    span.attributes or {}
+                ),
+                "events": [
+                    {
+                        "name": event.name,
+                        "attributes": dict(
+                            event.attributes or {}
+                        ),
+                    }
+                    for event in span.events
+                ],
+                "status": {
+                    "status_code": str(
+                        span.status.status_code
+                    ),
+                    "description": (
+                        span.status.description
+                    ),
+                },
+            }
+        )
+
+        assert secret not in exported
+        assert "provider-secret=" not in exported
+        assert "Traceback" not in exported
     finally:
         runtime.shutdown()
