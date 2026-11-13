@@ -186,7 +186,7 @@ def test_successful_dispatch_commits_each_transition(
 
     response = dispatcher.execute(
         request=request, policies=policies, estimate=estimate
-    )
+    , execution_id=uuid4())
 
     assert response.succeeded
     assert events == [
@@ -213,7 +213,7 @@ def test_no_provider_call_without_committed_dispatch(
     with pytest.raises(RuntimeError):
         dispatcher.execute(
             request=request, policies=policies, estimate=estimate
-        )
+        , execution_id=uuid4())
 
     assert "generate" not in events
     assert "settle" not in events
@@ -229,7 +229,7 @@ def test_provider_exception_records_unknown_consumption(
     with pytest.raises(ConnectionError):
         dispatcher.execute(
             request=request, policies=policies, estimate=estimate
-        )
+        , execution_id=uuid4())
 
     assert events[-2:] == ["settle", "commit"]
     consumption = ledger.settlements[0].consumption
@@ -248,7 +248,7 @@ def test_response_identity_mismatch_is_not_trusted(
     with pytest.raises(ValueError, match="identity mismatch"):
         dispatcher.execute(
             request=request, policies=policies, estimate=estimate
-        )
+        , execution_id=uuid4())
 
     assert ledger.settlements[0].consumption.provider_tokens is None
 
@@ -263,7 +263,7 @@ def test_settlement_failure_is_not_silenced(
     with pytest.raises(RuntimeError, match="settlement failed"):
         dispatcher.execute(
             request=request, policies=policies, estimate=estimate
-        )
+        , execution_id=uuid4())
 
     assert events[-2:] == ["settle", "rollback"]
 
@@ -285,7 +285,7 @@ def test_multi_attempt_estimate_rejected_before_reservation(
     with pytest.raises(ValueError, match="one-attempt"):
         dispatcher.execute(
             request=request, policies=policies, estimate=estimate
-        )
+        , execution_id=uuid4())
 
     assert events == []
 
@@ -320,7 +320,7 @@ def test_dispatch_commit_failure_blocks_provider(
             request=request,
             policies=policies,
             estimate=estimate,
-        )
+         execution_id=uuid4(),)
 
     assert "generate" not in events
     assert "settle" not in events

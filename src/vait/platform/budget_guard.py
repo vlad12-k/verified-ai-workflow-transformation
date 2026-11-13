@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from vait.contracts.budgeting import (
     BudgetConsumption,
@@ -48,7 +48,7 @@ class BudgetedProviderDispatcher:
         request: ProviderInferenceRequest,
         policies: Sequence[BudgetPolicy],
         estimate: BudgetEstimate,
-        execution_id: UUID | None = None,
+        execution_id: UUID,
     ) -> ProviderInferenceResponse:
         """Reserve, dispatch, execute and settle separately."""
 
@@ -62,7 +62,7 @@ class BudgetedProviderDispatcher:
             )
 
         reservation_request = BudgetReservationRequest(
-            reservation_id=execution_id if execution_id is not None else uuid4(),
+            reservation_id=execution_id,
             policies=tuple(policies),
             estimate=estimate,
         )

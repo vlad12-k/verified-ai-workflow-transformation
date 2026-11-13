@@ -1437,7 +1437,7 @@ def test_m6c3_budget_guard_committed_dispatch_and_denial(
             request=request,
             policies=(policy,),
             estimate=estimate,
-        )
+         execution_id=uuid4(),)
 
     assert captured.value.code is BudgetDenialCode.REQUEST_LIMIT_EXCEEDED
     assert provider.calls == 1
@@ -1499,7 +1499,7 @@ def test_m6c3_budget_guard_unknown_consumption_after_provider_exception(
             request=request,
             policies=(policy,),
             estimate=_request(policy=policy).estimate,
-        )
+         execution_id=uuid4(),)
 
     with migrated_engine.connect() as connection:
         settled = connection.execute(
@@ -1601,7 +1601,7 @@ def test_m6c3_pre_dispatch_failure_can_be_safely_released(
                 request=request,
                 policies=(policy,),
                 estimate=_request(policy=policy).estimate,
-            )
+             execution_id=uuid4(),)
 
     assert provider.calls == 0
 
