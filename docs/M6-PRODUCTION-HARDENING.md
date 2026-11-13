@@ -221,6 +221,54 @@ A provider budget violation must block the external call before execution.
 It must not merely report excessive usage after the request has already been
 sent.
 
+### Provider-dispatch boundary (M6-C3.5)
+
+Platform-controlled provider work must enter through
+`vait.platform.provider_execution.BudgetedJobProviderInvocation` with a
+`RUNNING` job record returned by a committed durable claim. Before planning,
+the adapter re-reads that ID and requires a live `RUNNING` row whose `claimed_by`
+matches the adapter's trusted worker ID and whose lease has not expired. The
+resolver receives this database-backed record, not caller-supplied job fields.
+The invocation identity is the persisted `job_id`; request IDs and caller
+idempotency keys are not execution authority. Its injected
+`ProviderBudgetPlanResolver` must obtain the request policy and estimate from
+trusted server-side context, never from caller-controlled payload or inference
+metadata.
+
+The provider wrapper rechecks the current durable owner, status, attempt, and
+lease at the `generate` boundary after plan resolution and immediately before
+delegating to the underlying provider. If lease recovery wins during planning,
+provider I/O is blocked and the already-dispatched reservation is settled
+conservatively with unknown consumption. This fence is point-in-time rather
+than an atomic lease lock: a process paused immediately after the check could
+resume after expiry and start provider I/O. M6-D must define a durable dispatch
+fence or equivalent stale-worker protection, along with bounded cancellation
+and a shared authoritative or sufficiently synchronized UTC time source for
+claim, recovery, and lease validation. The lease can also expire during an
+outbound provider request; those worker lifecycle controls remain M6-D
+responsibilities.
+
+The adapter delegates to the durable budget dispatcher, which commits
+admission and a strict dispatch claim before provider I/O and records unknown
+consumption after an indeterminate provider failure. It supports one
+`generate` call on attempt one only. Retry attempts and native batch dispatch
+are unsupported and must fail closed. Any deterministic cache decorator must
+sit behind this boundary so cache hits, misses, and bypasses all require
+admission. Research benchmarks and provider-neutral RAG/cache utilities are
+not platform-controlled execution paths; they may still incur external usage
+when a caller supplies a remote provider and must not be mistaken for guarded
+platform work.
+
+The current `WorkerService` has only a generic executor protocol; no concrete
+provider job executor, trusted policy resolver, or provider composition root
+is wired into the platform API. M6-D must connect those components and verify
+lease recovery and retry behavior before the adapter is considered reachable
+for operational platform execution. Until then, the adapter and its
+PostgreSQL-backed tests are a ready-to-wire boundary, not evidence that a live
+platform provider path is active or production-ready. Provider integrations
+with opaque internal retries remain unsupported until their actual attempt
+semantics are verified and represented in budget accounting.
+
 ---
 
 ## M6-D — Worker operational hardening
