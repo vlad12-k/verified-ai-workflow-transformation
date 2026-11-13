@@ -86,6 +86,7 @@ class JobRepository(Repository[JobRecord, UUID]):
         worker_id: str,
         now: datetime,
         lease_seconds: int,
+        allowed_operations: tuple[str, ...] | None = None,
     ) -> JobRecord | None:
         """Atomically claim the oldest eligible pending job.
 
@@ -107,6 +108,17 @@ class JobRepository(Repository[JobRecord, UUID]):
                 "lease_seconds must be positive"
             )
 
+        if allowed_operations is not None and (
+            not allowed_operations
+            or any(
+                not operation
+                or operation.strip() != operation
+                or len(operation) > 128
+                for operation in allowed_operations
+            )
+        ):
+            raise ValueError("Invalid allowed_operations")
+
         statement = (
             select(JobRow)
             .where(
@@ -122,6 +134,11 @@ class JobRepository(Repository[JobRecord, UUID]):
                 skip_locked=True,
             )
         )
+
+        if allowed_operations is not None:
+            statement = statement.where(
+                JobRow.operation.in_(allowed_operations)
+            )
 
         row = self.session.scalars(
             statement

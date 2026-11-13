@@ -144,11 +144,12 @@ def _create_pending_job(
     *,
     experiment_id: UUID,
     max_attempts: int = 3,
+    operation: str = "verification",
 ) -> JobRecord:
     job = JobRecord(
         job_id=uuid4(),
         experiment_id=experiment_id,
-        operation="verification",
+        operation=operation,
         payload={},
         idempotency_key=str(uuid4()),
         max_attempts=max_attempts,
@@ -159,6 +160,40 @@ def _create_pending_job(
         JobRepository(session).add(job)
 
     return job
+
+
+def test_worker_claim_filters_unsupported_operations(
+    jobs_runtime: DatabaseRuntime,
+) -> None:
+    """Unregistered jobs must not be claimed by a scoped worker."""
+    experiment = _create_experiment(jobs_runtime)
+
+    unsupported = _create_pending_job(
+        jobs_runtime,
+        experiment_id=experiment.experiment_id,
+        operation="unregistered-operation",
+    )
+    supported = _create_pending_job(
+        jobs_runtime,
+        experiment_id=experiment.experiment_id,
+        operation="verification",
+    )
+
+    with transactional_session(jobs_runtime) as session:
+        repository = JobRepository(session)
+        claimed = repository.claim_next(
+            worker_id="scoped-worker",
+            now=datetime.now(UTC),
+            lease_seconds=60,
+            allowed_operations=("verification",),
+        )
+        untouched = repository.get(unsupported.job_id)
+
+    assert claimed is not None
+    assert claimed.job_id == supported.job_id
+    assert untouched is not None
+    assert untouched.status == "PENDING"
+    assert untouched.attempt == 0
 
 
 def test_heartbeat_renews_only_owner_lease(
