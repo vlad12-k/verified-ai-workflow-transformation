@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from vait.platform.jobs.models import JobRecord
@@ -170,6 +170,7 @@ class JobRepository(Repository[JobRecord, UUID]):
         *,
         job_id: UUID,
         worker_id: str,
+        expected_attempt: int,
         now: datetime,
         lease_seconds: int,
     ) -> JobRecord | None:
@@ -189,12 +190,17 @@ class JobRepository(Repository[JobRecord, UUID]):
                 "lease_seconds must be positive"
             )
 
+        if expected_attempt < 1:
+            raise ValueError("expected_attempt must be positive")
+
         statement = (
             select(JobRow)
             .where(
                 JobRow.job_id == job_id,
                 JobRow.status == "RUNNING",
                 JobRow.claimed_by == worker_id,
+                JobRow.attempt == expected_attempt,
+                JobRow.lease_expires_at > func.clock_timestamp(),
             )
             .with_for_update()
         )
@@ -223,6 +229,7 @@ class JobRepository(Repository[JobRecord, UUID]):
         *,
         job_id: UUID,
         worker_id: str,
+        expected_attempt: int,
         now: datetime,
     ) -> JobRecord | None:
         """Complete a running job successfully."""
@@ -231,12 +238,17 @@ class JobRepository(Repository[JobRecord, UUID]):
                 "now must be timezone-aware"
             )
 
+        if expected_attempt < 1:
+            raise ValueError("expected_attempt must be positive")
+
         statement = (
             select(JobRow)
             .where(
                 JobRow.job_id == job_id,
                 JobRow.status == "RUNNING",
                 JobRow.claimed_by == worker_id,
+                JobRow.attempt == expected_attempt,
+                JobRow.lease_expires_at > func.clock_timestamp(),
             )
             .with_for_update()
         )
@@ -260,6 +272,7 @@ class JobRepository(Repository[JobRecord, UUID]):
         *,
         job_id: UUID,
         worker_id: str,
+        expected_attempt: int,
         now: datetime,
         error_code: str,
     ) -> JobRecord | None:
@@ -274,12 +287,17 @@ class JobRepository(Repository[JobRecord, UUID]):
                 "now must be timezone-aware"
             )
 
+        if expected_attempt < 1:
+            raise ValueError("expected_attempt must be positive")
+
         statement = (
             select(JobRow)
             .where(
                 JobRow.job_id == job_id,
                 JobRow.status == "RUNNING",
                 JobRow.claimed_by == worker_id,
+                JobRow.attempt == expected_attempt,
+                JobRow.lease_expires_at > func.clock_timestamp(),
             )
             .with_for_update()
         )

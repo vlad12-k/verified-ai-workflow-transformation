@@ -3,7 +3,7 @@
 import json
 import os
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from io import StringIO
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -666,3 +666,39 @@ def test_worker_failure_events_share_one_trace_span(
         assert "Traceback" not in serialized
     finally:
         tracing_runtime.shutdown()
+
+
+
+def test_worker_cannot_report_success_after_lease_expiry(
+    worker_runtime: DatabaseRuntime,
+) -> None:
+    """Execution completion must not revive an expired claim."""
+    experiment = _create_experiment(worker_runtime)
+    job = _create_job(
+        worker_runtime,
+        experiment_id=experiment.experiment_id,
+    )
+    executor = SuccessfulExecutor(worker_runtime)
+
+    worker = WorkerService(
+        runtime=worker_runtime,
+        executor=executor,
+        worker_id="expired-worker",
+        lease_seconds=60,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Claimed job lost worker ownership",
+    ):
+        worker.run_once(
+            now=datetime.now(UTC) - timedelta(minutes=2),
+        )
+
+    with transactional_session(worker_runtime) as session:
+        persisted = JobRepository(session).get(job.job_id)
+
+    assert executor.seen_job_ids == [job.job_id]
+    assert persisted is not None
+    assert persisted.status == "RUNNING"
+    assert persisted.finished_at is None

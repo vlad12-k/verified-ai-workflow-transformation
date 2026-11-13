@@ -4,6 +4,7 @@ import os
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from pathlib import Path
 from threading import Barrier, Lock
 from uuid import UUID, uuid4
@@ -31,6 +32,7 @@ from vait.inference.providers.models import (
     ProviderTokenUsage,
 )
 from vait.platform.jobs import JobRecord
+from vait.platform.jobs.provider_evidence import PostgreSQLProviderEvidenceWriter
 from vait.platform.persistence.engine import (
     DatabaseRuntime,
     create_database_runtime,
@@ -42,6 +44,7 @@ from vait.platform.persistence.repositories.jobs import (
     JobRepository,
 )
 from vait.platform.persistence.repositories.registry import (
+    EvidenceRepository,
     ExperimentRunRepository,
 )
 from vait.platform.persistence.session import (
@@ -229,6 +232,7 @@ def test_heartbeat_renews_only_owner_lease(
         renewed = JobRepository(
             session
         ).heartbeat(
+            expected_attempt=claimed.attempt,
             job_id=job.job_id,
             worker_id="worker-01",
             now=heartbeat_at,
@@ -245,6 +249,7 @@ def test_heartbeat_renews_only_owner_lease(
         rejected = JobRepository(
             session
         ).heartbeat(
+            expected_attempt=claimed.attempt,
             job_id=job.job_id,
             worker_id="worker-02",
             now=heartbeat_at,
@@ -287,6 +292,7 @@ def test_running_job_can_complete_successfully(
         completed = JobRepository(
             session
         ).mark_succeeded(
+            expected_attempt=claimed.attempt,
             job_id=job.job_id,
             worker_id="worker-01",
             now=finished_at,
@@ -328,6 +334,7 @@ def test_failure_can_retry_then_be_claimed_again(
         retry = JobRepository(
             session
         ).mark_failed_or_retry(
+            expected_attempt=first_claim.attempt,
             job_id=job.job_id,
             worker_id="worker-01",
             now=first_claim_at + timedelta(
@@ -400,6 +407,7 @@ def test_exhausted_failure_becomes_terminal(
         failed = JobRepository(
             session
         ).mark_failed_or_retry(
+            expected_attempt=claimed.attempt,
             job_id=job.job_id,
             worker_id="worker-01",
             now=failed_at,
@@ -1053,3 +1061,300 @@ def test_cache_hits_and_bypasses_still_require_budget_admission(
             {"reservation_id": job_ids[3]},
         )
     assert denied_reservation_count == 0
+
+
+
+@pytest.mark.parametrize(
+    "action",
+    ["heartbeat", "success", "failure"],
+)
+def test_expired_claim_cannot_mutate_job(
+    jobs_runtime: DatabaseRuntime,
+    action: str,
+) -> None:
+    """An expired lease blocks renewal and terminal writes."""
+    experiment = _create_experiment(jobs_runtime)
+    job = _create_pending_job(
+        jobs_runtime,
+        experiment_id=experiment.experiment_id,
+    )
+
+    claimed_at = datetime.now(UTC) - timedelta(minutes=2)
+
+    with transactional_session(jobs_runtime) as session:
+        claimed = JobRepository(session).claim_next(
+            worker_id="expired-worker",
+            now=claimed_at,
+            lease_seconds=60,
+        )
+
+    assert claimed is not None
+    assert claimed.status == "RUNNING"
+
+    finished_at = datetime.now(UTC)
+
+    with transactional_session(jobs_runtime) as session:
+        repository = JobRepository(session)
+
+        if action == "heartbeat":
+            rejected = repository.heartbeat(
+                expected_attempt=claimed.attempt,
+                job_id=job.job_id,
+                worker_id="expired-worker",
+                now=finished_at,
+                lease_seconds=60,
+            )
+        elif action == "success":
+            rejected = repository.mark_succeeded(
+                expected_attempt=claimed.attempt,
+                job_id=job.job_id,
+                worker_id="expired-worker",
+                now=finished_at,
+            )
+        else:
+            rejected = repository.mark_failed_or_retry(
+                expected_attempt=claimed.attempt,
+                job_id=job.job_id,
+                worker_id="expired-worker",
+                now=finished_at,
+                error_code="EXPIRED_TEST",
+            )
+
+        persisted = repository.get(job.job_id)
+
+    assert rejected is None
+    assert persisted is not None
+    assert persisted.status == "RUNNING"
+    assert persisted.attempt == 1
+    assert persisted.lease_expires_at == claimed.lease_expires_at
+
+
+
+def test_old_attempt_cannot_mutate_reclaimed_same_worker(
+    jobs_runtime: DatabaseRuntime,
+) -> None:
+    """Reusing worker_id cannot grant an old attempt ownership."""
+    experiment = _create_experiment(jobs_runtime)
+    job = _create_pending_job(
+        jobs_runtime,
+        experiment_id=experiment.experiment_id,
+        max_attempts=2,
+    )
+
+    with transactional_session(jobs_runtime) as session:
+        first = JobRepository(session).claim_next(
+            worker_id="reused-worker",
+            now=datetime.now(UTC) - timedelta(minutes=2),
+            lease_seconds=60,
+        )
+
+    assert first is not None
+    assert first.attempt == 1
+
+    with transactional_session(jobs_runtime) as session:
+        repository = JobRepository(session)
+        recovered = repository.recover_expired_leases(
+            now=datetime.now(UTC),
+        )
+        assert len(recovered) == 1
+        requeued = repository.requeue_retry(job_id=job.job_id)
+
+    assert requeued is not None
+    assert requeued.status == "PENDING"
+
+    with transactional_session(jobs_runtime) as session:
+        second = JobRepository(session).claim_next(
+            worker_id="reused-worker",
+            now=datetime.now(UTC),
+            lease_seconds=60,
+        )
+
+    assert second is not None
+    assert second.attempt == 2
+
+    with transactional_session(jobs_runtime) as session:
+        repository = JobRepository(session)
+
+        stale_success = repository.mark_succeeded(
+            job_id=job.job_id,
+            worker_id="reused-worker",
+            expected_attempt=first.attempt,
+            now=datetime.now(UTC),
+        )
+        stale_failure = repository.mark_failed_or_retry(
+            job_id=job.job_id,
+            worker_id="reused-worker",
+            expected_attempt=first.attempt,
+            now=datetime.now(UTC),
+            error_code="STALE_ATTEMPT",
+        )
+        stale_heartbeat = repository.heartbeat(
+            job_id=job.job_id,
+            worker_id="reused-worker",
+            expected_attempt=first.attempt,
+            now=datetime.now(UTC),
+            lease_seconds=60,
+        )
+        current = repository.get(job.job_id)
+
+    assert stale_success is None
+    assert stale_failure is None
+    assert stale_heartbeat is None
+    assert current is not None
+    assert current.status == "RUNNING"
+    assert current.attempt == 2
+    assert current.claimed_by == "reused-worker"
+
+    with transactional_session(jobs_runtime) as session:
+        completed = JobRepository(session).mark_succeeded(
+            job_id=job.job_id,
+            worker_id="reused-worker",
+            expected_attempt=second.attempt,
+            now=datetime.now(UTC),
+        )
+
+    assert completed is not None
+    assert completed.status == "SUCCEEDED"
+
+
+
+def _provider_evidence_response() -> ProviderInferenceResponse:
+    return ProviderInferenceResponse(
+        request_id="evidence-request",
+        provider_id="test-provider",
+        runtime_id="test-runtime",
+        model_id="test-model",
+        output_text="api_key=must-never-be-persisted",
+        usage=ProviderTokenUsage(input_tokens=3, output_tokens=2),
+        timing=ProviderTiming(total_latency_ms=2.0),
+    )
+
+
+def _provider_evidence_claim(
+    runtime: DatabaseRuntime,
+    *,
+    expired: bool = False,
+) -> JobRecord:
+    experiment = _create_experiment(runtime)
+    job = _create_pending_job(
+        runtime,
+        experiment_id=experiment.experiment_id,
+        operation="provider-inference",
+        max_attempts=1,
+    )
+    claim_time = datetime.now(UTC)
+    if expired:
+        claim_time -= timedelta(minutes=2)
+
+    with transactional_session(runtime) as session:
+        claimed = JobRepository(session).claim_next(
+            worker_id="evidence-worker",
+            now=claim_time,
+            lease_seconds=60,
+            allowed_operations=("provider-inference",),
+        )
+
+    assert claimed is not None
+    assert claimed.job_id == job.job_id
+    return claimed
+
+
+def test_provider_evidence_writer_commits_once(
+    jobs_runtime: DatabaseRuntime,
+) -> None:
+    """Identical replay must not duplicate committed inference evidence."""
+    job = _provider_evidence_claim(jobs_runtime)
+    response = _provider_evidence_response()
+    assert response.output_text is not None
+    writer = PostgreSQLProviderEvidenceWriter(
+        runtime=jobs_runtime,
+        worker_id="evidence-worker",
+    )
+
+    writer.persist(job=job, response=response)
+    writer.persist(job=job, response=response)
+
+    with transactional_session(jobs_runtime) as session:
+        records = EvidenceRepository(session).list_for_experiment(
+            job.experiment_id
+        )
+
+    assert len(records) == 1
+    assert records[0].kind == "inference"
+    assert records[0].payload["job_id"] == str(job.job_id)
+    assert records[0].payload["output_sha256"] == sha256(
+        response.output_text.encode("utf-8")
+    ).hexdigest()
+    assert response.output_text not in str(records[0].payload)
+    assert "output_text" not in records[0].payload
+    assert "metadata" not in records[0].payload
+
+
+def test_provider_evidence_writer_rejects_expired_claim(
+    jobs_runtime: DatabaseRuntime,
+) -> None:
+    job = _provider_evidence_claim(jobs_runtime, expired=True)
+    writer = PostgreSQLProviderEvidenceWriter(
+        runtime=jobs_runtime,
+        worker_id="evidence-worker",
+    )
+
+    with pytest.raises(RuntimeError, match="active first-attempt claim"):
+        writer.persist(job=job, response=_provider_evidence_response())
+
+    with transactional_session(jobs_runtime) as session:
+        records = EvidenceRepository(session).list_for_experiment(
+            job.experiment_id
+        )
+
+    assert records == ()
+
+
+def test_provider_evidence_writer_rejects_other_worker(
+    jobs_runtime: DatabaseRuntime,
+) -> None:
+    job = _provider_evidence_claim(jobs_runtime)
+    writer = PostgreSQLProviderEvidenceWriter(
+        runtime=jobs_runtime,
+        worker_id="other-worker",
+    )
+
+    with pytest.raises(ValueError, match="not eligible"):
+        writer.persist(job=job, response=_provider_evidence_response())
+
+    with transactional_session(jobs_runtime) as session:
+        records = EvidenceRepository(session).list_for_experiment(
+            job.experiment_id
+        )
+
+    assert records == ()
+
+
+def test_provider_evidence_writer_rejects_conflicting_replay(
+    jobs_runtime: DatabaseRuntime,
+) -> None:
+    job = _provider_evidence_claim(jobs_runtime)
+    response = _provider_evidence_response()
+    assert response.output_text is not None
+    writer = PostgreSQLProviderEvidenceWriter(
+        runtime=jobs_runtime,
+        worker_id="evidence-worker",
+    )
+    writer.persist(job=job, response=response)
+
+    changed = response.model_copy(
+        update={"output_text": "different-result"}
+    )
+
+    with pytest.raises(RuntimeError, match="Conflicting provider evidence"):
+        writer.persist(job=job, response=changed)
+
+    with transactional_session(jobs_runtime) as session:
+        records = EvidenceRepository(session).list_for_experiment(
+            job.experiment_id
+        )
+
+    assert len(records) == 1
+    assert records[0].payload["output_sha256"] == sha256(
+        response.output_text.encode("utf-8")
+    ).hexdigest()

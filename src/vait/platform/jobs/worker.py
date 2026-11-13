@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from vait.platform.jobs.models import JobRecord
+from vait.platform.jobs.models import JobRecord, utc_now
 from vait.platform.observability import (
     TracingRuntime,
     bind_log_context,
@@ -134,7 +134,8 @@ class WorkerService:
                     ).mark_failed_or_retry(
                         job_id=claimed.job_id,
                         worker_id=self._worker_id,
-                        now=now,
+                        expected_attempt=claimed.attempt,
+                        now=utc_now(),
                         error_code=error_code,
                     )
 
@@ -171,7 +172,8 @@ class WorkerService:
                 ).mark_succeeded(
                     job_id=claimed.job_id,
                     worker_id=self._worker_id,
-                    now=now,
+                    expected_attempt=claimed.attempt,
+                    now=utc_now(),
                 )
 
             if completed is None:
