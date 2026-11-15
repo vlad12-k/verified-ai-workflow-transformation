@@ -305,6 +305,51 @@ PostgreSQL remains the durable source of truth.
 Redis remains unnecessary unless a new measured requirement overturns the
 existing ADR decision.
 
+
+### M6-D2F3C2 — Confirmed post-validation dispatch race
+
+**Security disposition: OPEN / NO-GO for strict no-late-I/O guarantees.**
+
+Evidence: `test_pause_after_final_claim_check_exposes_late_provider_io`
+in `tests/integration/test_platform_postgresql_job_lifecycle.py`.
+
+The deterministic PostgreSQL test demonstrated that a worker can:
+
+1. Commit one durable budget dispatch.
+2. Pass the final database-backed lease check.
+3. Pause before calling the underlying provider.
+4. Lose its job lease.
+5. Resume and invoke the fake provider after lease expiry.
+
+The test passed because it successfully reproduced the unsafe timing
+window. It must not be interpreted as proof that the race is fixed.
+
+Existing protections:
+
+- One durable budget dispatch is claimed per execution identity.
+- Provider-inference retry attempts are rejected at the dispatch boundary.
+- Invalid ownership before dispatch blocks provider I/O.
+- Known pre-dispatch rejection releases reserved budget capacity.
+- Unknown post-dispatch consumption is not refunded as known zero.
+
+Remaining limitations:
+
+- PostgreSQL ownership checks cannot atomically control external HTTP I/O.
+- Provider request IDs are not proof of remote idempotency.
+- A receiver-enforced fencing mechanism has not been demonstrated.
+- Provider-specific implicit retry behaviour requires verification.
+
+Required before claiming strict prevention of late external requests:
+
+- Define the desired delivery guarantee and failure-state contract.
+- Evaluate provider-supported idempotency and fencing capabilities.
+- Establish receiver-side enforcement where strict fencing is required.
+- Test paused workers, crashes, retry ambiguity and stale ownership.
+- Record an explicit residual-risk decision for unsupported providers.
+
+Do not enable an unrestricted live provider worker on the assumption
+that successful CI proves this security guarantee.
+
 ---
 
 ## M6-E — Persistence recovery and migration safety

@@ -1694,3 +1694,128 @@ def test_revocation_after_dispatch_before_provider_check_blocks_io(
         1,
         None,
     )
+
+
+
+def test_pause_after_final_claim_check_exposes_late_provider_io(
+    jobs_runtime: DatabaseRuntime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Document the residual post-validation TOCTOU window."""
+    experiment = _create_experiment(jobs_runtime)
+    job = _claim_provider_job(
+        jobs_runtime,
+        experiment_id=experiment.experiment_id,
+        max_attempts=1,
+    )
+
+    plan = _provider_plan(_provider_policy())
+
+    class LateInvocationProbe(DatabaseCheckingProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                jobs_runtime,
+                reservation_ids=(job.job_id,),
+            )
+            self.expired_at_io = False
+
+        def generate(
+            self,
+            request: ProviderInferenceRequest,
+        ) -> ProviderInferenceResponse:
+            with jobs_runtime.engine.connect() as connection:
+                expired = connection.scalar(
+                    text(
+                        "SELECT lease_expires_at < clock_timestamp() "
+                        "FROM jobs WHERE job_id = :job_id"
+                    ),
+                    {"job_id": job.job_id},
+                )
+
+            self.expired_at_io = expired is True
+            return super().generate(request)
+
+    provider = LateInvocationProbe()
+
+    validation_done = Event()
+    resume_execution = Event()
+
+    original_check = provider_execution._require_active_job_claim
+    checks = 0
+
+    def pause_after_validation(
+        *,
+        runtime: DatabaseRuntime,
+        job_id: UUID,
+        worker_id: str,
+    ) -> JobRecord:
+        nonlocal checks
+
+        validated = original_check(
+            runtime=runtime,
+            job_id=job_id,
+            worker_id=worker_id,
+        )
+
+        checks += 1
+
+        if checks == 2:
+            validation_done.set()
+            if not resume_execution.wait(timeout=15):
+                raise TimeoutError("Worker was not resumed")
+
+        return validated
+
+    monkeypatch.setattr(
+        provider_execution,
+        "_require_active_job_claim",
+        pause_after_validation,
+    )
+
+    invocation = BudgetedJobProviderInvocation(
+        provider=provider,
+        runtime=jobs_runtime,
+        plan_resolver=StaticProviderBudgetPlanResolver(plan),
+        worker_id=_PROVIDER_WORKER_ID,
+    )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(invocation.invoke, job)
+
+        try:
+            assert validation_done.wait(timeout=15)
+
+            assert _budget_row(
+                jobs_runtime,
+                job.job_id,
+            )[0] == BudgetReservationState.DISPATCHED.value
+
+            with jobs_runtime.engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "UPDATE jobs "
+                        "SET lease_expires_at = "
+                        "clock_timestamp() - INTERVAL '1 second' "
+                        "WHERE job_id = :job_id"
+                    ),
+                    {"job_id": job.job_id},
+                )
+        finally:
+            resume_execution.set()
+
+        response = future.result(timeout=15)
+
+    assert response.succeeded
+    assert checks == 2
+
+    # Diagnostic evidence: late I/O is currently possible.
+    assert provider.expired_at_io is True
+    assert provider.requests == [plan.request]
+
+    # One dispatch remains durably charged, not replayed.
+    assert _budget_row(jobs_runtime, job.job_id) == (
+        BudgetReservationState.SETTLED.value,
+        1,
+        1,
+        5,
+    )
