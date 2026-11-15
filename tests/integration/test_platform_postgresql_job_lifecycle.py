@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
-from threading import Barrier, Lock
+from threading import Barrier, Event, Lock
 from uuid import UUID, uuid4
 
 import pytest
@@ -14,6 +14,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
 
+import vait.platform.provider_execution as provider_execution
 from vait.contracts.budgeting import (
     BudgetDeniedError,
     BudgetEstimate,
@@ -1598,3 +1599,98 @@ def test_dispatch_rejects_claim_revoked_after_admission(
         )
 
     assert state == BudgetReservationState.RELEASED.value
+
+
+
+def test_revocation_after_dispatch_before_provider_check_blocks_io(
+    jobs_runtime: DatabaseRuntime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Expired ownership after committed dispatch blocks provider I/O."""
+    experiment = _create_experiment(jobs_runtime)
+    job = _claim_provider_job(
+        jobs_runtime,
+        experiment_id=experiment.experiment_id,
+        max_attempts=1,
+    )
+
+    plan = _provider_plan(_provider_policy())
+    provider = DatabaseCheckingProvider(
+        jobs_runtime,
+        reservation_ids=(job.job_id,),
+    )
+
+    reached_check = Event()
+    resume_check = Event()
+    original_check = provider_execution._require_active_job_claim
+    check_count = 0
+
+    def delayed_claim_check(
+        *,
+        runtime: DatabaseRuntime,
+        job_id: UUID,
+        worker_id: str,
+    ) -> JobRecord:
+        nonlocal check_count
+        check_count += 1
+
+        if check_count == 2:
+            reached_check.set()
+            if not resume_check.wait(timeout=10):
+                raise TimeoutError("Claim check was not resumed")
+
+        return original_check(
+            runtime=runtime,
+            job_id=job_id,
+            worker_id=worker_id,
+        )
+
+    monkeypatch.setattr(
+        provider_execution,
+        "_require_active_job_claim",
+        delayed_claim_check,
+    )
+
+    invocation = BudgetedJobProviderInvocation(
+        provider=provider,
+        runtime=jobs_runtime,
+        plan_resolver=StaticProviderBudgetPlanResolver(plan),
+        worker_id=_PROVIDER_WORKER_ID,
+    )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(invocation.invoke, job)
+
+        try:
+            assert reached_check.wait(timeout=10)
+            assert _budget_row(
+                jobs_runtime, job.job_id
+            )[0] == BudgetReservationState.DISPATCHED.value
+
+            with jobs_runtime.engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "UPDATE jobs "
+                        "SET lease_expires_at = "
+                        "clock_timestamp() - INTERVAL '1 second' "
+                        "WHERE job_id = :job_id"
+                    ),
+                    {"job_id": job.job_id},
+                )
+        finally:
+            resume_check.set()
+
+        with pytest.raises(
+            ValueError,
+            match="active durable job claim",
+        ):
+            future.result(timeout=15)
+
+    assert check_count == 2
+    assert provider.requests == []
+    assert _budget_row(jobs_runtime, job.job_id) == (
+        BudgetReservationState.SETTLED.value,
+        1,
+        1,
+        None,
+    )
