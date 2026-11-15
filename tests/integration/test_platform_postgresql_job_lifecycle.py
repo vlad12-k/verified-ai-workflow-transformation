@@ -18,6 +18,7 @@ from vait.contracts.budgeting import (
     BudgetDeniedError,
     BudgetEstimate,
     BudgetPolicy,
+    BudgetReservation,
     BudgetReservationRequest,
     BudgetReservationState,
 )
@@ -645,12 +646,14 @@ def _claim_provider_job(
         runtime,
         experiment_id=experiment_id,
         max_attempts=max_attempts,
+        operation="provider-inference",
     )
     with transactional_session(runtime) as session:
         claimed = JobRepository(session).claim_next(
             worker_id=_PROVIDER_WORKER_ID,
             now=datetime.now(UTC),
             lease_seconds=60,
+            allowed_operations=("provider-inference",),
         )
 
     assert claimed is not None
@@ -865,9 +868,9 @@ def test_claim_recovered_during_plan_resolution_prevents_provider_io(
     assert [record.job_id for record in resolver.recovered] == [job.job_id]
     assert provider.requests == []
     assert _budget_row(jobs_runtime, job.job_id) == (
-        BudgetReservationState.SETTLED.value,
-        1,
-        1,
+        BudgetReservationState.RELEASED.value,
+        None,
+        None,
         None,
     )
 
@@ -1511,3 +1514,87 @@ def test_atomic_completion_rejects_expired_claim(
     assert persisted is not None
     assert persisted.status == "RUNNING"
     assert records == ()
+
+
+
+@pytest.mark.parametrize(
+    "revocation",
+    ["expired_lease", "changed_owner", "changed_operation"],
+)
+def test_dispatch_rejects_claim_revoked_after_admission(
+    jobs_runtime: DatabaseRuntime,
+    monkeypatch: pytest.MonkeyPatch,
+    revocation: str,
+) -> None:
+    """A changed job cannot dispatch after budget admission."""
+    experiment = _create_experiment(jobs_runtime)
+    job = _claim_provider_job(
+        jobs_runtime,
+        experiment_id=experiment.experiment_id,
+        max_attempts=1,
+    )
+
+    plan = _provider_plan(_provider_policy())
+    provider = DatabaseCheckingProvider(jobs_runtime)
+
+    original_reserve = PostgreSQLBudgetReservationLedger.reserve
+
+    mutations = {
+        "expired_lease": (
+            "UPDATE jobs "
+            "SET lease_expires_at = clock_timestamp() "
+            "- INTERVAL '1 second' "
+            "WHERE job_id = :job_id"
+        ),
+        "changed_owner": (
+            "UPDATE jobs SET claimed_by = 'replacement-worker' "
+            "WHERE job_id = :job_id"
+        ),
+        "changed_operation": (
+            "UPDATE jobs SET operation = 'verification' "
+            "WHERE job_id = :job_id"
+        ),
+    }
+
+    def reserve_then_revoke(
+        ledger: PostgreSQLBudgetReservationLedger,
+        request: BudgetReservationRequest,
+    ) -> BudgetReservation:
+        reserved = original_reserve(ledger, request)
+        ledger._session.execute(
+            text(mutations[revocation]),
+            {"job_id": job.job_id},
+        )
+        return reserved
+
+    monkeypatch.setattr(
+        PostgreSQLBudgetReservationLedger,
+        "reserve",
+        reserve_then_revoke,
+    )
+
+    invocation = BudgetedJobProviderInvocation(
+        provider=provider,
+        runtime=jobs_runtime,
+        plan_resolver=StaticProviderBudgetPlanResolver(plan),
+        worker_id=_PROVIDER_WORKER_ID,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Provider dispatch requires an active durable job claim",
+    ):
+        invocation.invoke(job)
+
+    assert provider.requests == []
+
+    with jobs_runtime.engine.connect() as connection:
+        state = connection.scalar(
+            text(
+                "SELECT state FROM budget_reservations "
+                "WHERE reservation_id = :reservation_id"
+            ),
+            {"reservation_id": job.job_id},
+        )
+
+    assert state == BudgetReservationState.RELEASED.value

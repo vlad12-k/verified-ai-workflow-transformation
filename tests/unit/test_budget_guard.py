@@ -92,6 +92,14 @@ class FakeLedger:
             SimpleNamespace(state=BudgetReservationState.DISPATCHED),
         )
 
+    def release(self, reservation_id: object) -> BudgetReservation:
+        del reservation_id
+        self.events.append("release")
+        return cast(
+            BudgetReservation,
+            SimpleNamespace(state=BudgetReservationState.RELEASED),
+        )
+
     def settle(
         self, settlement: BudgetSettlement
     ) -> BudgetReservation:
@@ -359,3 +367,56 @@ def test_stable_execution_identity_is_reserved(
 
     assert observed == [execution_id]
     assert events.count("generate") == 1
+
+
+
+def test_dispatch_claim_guard_precedes_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The claim guard runs before dispatch and provider I/O."""
+    dispatcher, _, _, events = make_harness(monkeypatch)
+    request, policies, estimate = input_data()
+
+    def validate_claim(_session: object) -> None:
+        events.append("claim_guard")
+
+    response = dispatcher.execute(
+        request=request,
+        policies=policies,
+        estimate=estimate,
+        execution_id=uuid4(),
+        dispatch_claim_guard=validate_claim,
+    )
+
+    assert response.succeeded
+    assert events == [
+        "reserve", "commit",
+        "claim_guard", "dispatch", "commit",
+        "generate", "settle", "commit",
+    ]
+
+
+def test_rejected_dispatch_claim_never_calls_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rejected claim must roll back before provider I/O."""
+    dispatcher, _, _, events = make_harness(monkeypatch)
+    request, policies, estimate = input_data()
+
+    def reject_claim(_session: object) -> None:
+        events.append("claim_rejected")
+        raise guard.DispatchClaimRejected("provider claim revoked")
+
+    with pytest.raises(ValueError, match="provider claim revoked"):
+        dispatcher.execute(
+            request=request,
+            policies=policies,
+            estimate=estimate,
+            execution_id=uuid4(),
+            dispatch_claim_guard=reject_claim,
+        )
+
+    assert events == [
+        "reserve", "commit",
+        "claim_rejected", "release", "commit",
+    ]

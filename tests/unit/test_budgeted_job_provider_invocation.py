@@ -401,3 +401,34 @@ def test_database_clock_rejects_expired_provider_claim(
 
     assert resolver.jobs == []
     assert provider.requests == []
+
+
+
+def test_verification_job_cannot_dispatch_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only provider-inference jobs can authorise provider I/O."""
+    monkeypatch.setattr(
+        provider_execution,
+        "BudgetedProviderDispatcher",
+        RecordingDispatcher,
+    )
+
+    job = _claimed_job().model_copy(
+        update={"operation": "verification"}
+    )
+    provider = RecordingProvider()
+    resolver = RecordingResolver(_plan())
+
+    invocation = provider_execution.BudgetedJobProviderInvocation(
+        provider=provider,
+        runtime=_runtime_with_job(job),
+        plan_resolver=resolver,
+        worker_id="worker-01",
+    )
+
+    with pytest.raises(ValueError, match="active durable job claim"):
+        invocation.invoke(job)
+
+    assert resolver.jobs == []
+    assert provider.requests == []

@@ -5,6 +5,7 @@ from typing import Protocol
 from uuid import UUID
 
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from vait.contracts.budgeting import BudgetEstimate, BudgetPolicy
 from vait.inference.providers.base import InferenceProvider
@@ -12,9 +13,13 @@ from vait.inference.providers.models import (
     ProviderInferenceRequest,
     ProviderInferenceResponse,
 )
-from vait.platform.budget_guard import BudgetedProviderDispatcher
+from vait.platform.budget_guard import (
+    BudgetedProviderDispatcher,
+    DispatchClaimRejected,
+)
 from vait.platform.jobs.models import JobRecord
 from vait.platform.persistence.engine import DatabaseRuntime
+from vait.platform.persistence.job_models import JobRow
 from vait.platform.persistence.repositories.jobs import JobRepository
 from vait.platform.persistence.session import transactional_session
 
@@ -59,6 +64,7 @@ def _require_active_job_claim(
 
     if (
         durable_job is None
+        or durable_job.operation != "provider-inference"
         or durable_job.status != "RUNNING"
         or durable_job.claimed_by != worker_id
         or durable_job.lease_expires_at is None
@@ -68,6 +74,34 @@ def _require_active_job_claim(
         raise ValueError("Provider invocation requires an active durable job claim.")
 
     return durable_job
+
+
+def _lock_active_dispatch_claim(
+    session: Session,
+    *,
+    job_id: UUID,
+    experiment_id: UUID,
+    worker_id: str,
+) -> None:
+    """Lock a live first-attempt provider claim before dispatch commit."""
+    active_job_id = session.scalar(
+        select(JobRow.job_id)
+        .where(
+            JobRow.job_id == job_id,
+            JobRow.experiment_id == experiment_id,
+            JobRow.operation == "provider-inference",
+            JobRow.status == "RUNNING",
+            JobRow.claimed_by == worker_id,
+            JobRow.attempt == 1,
+            JobRow.lease_expires_at > func.clock_timestamp(),
+        )
+        .with_for_update()
+    )
+
+    if active_job_id is None:
+        raise DispatchClaimRejected(
+            "Provider dispatch requires an active durable job claim."
+        )
 
 
 class _ClaimValidatedProvider:
@@ -146,6 +180,15 @@ class BudgetedJobProviderInvocation:
             raise ValueError("Only the first durable job attempt is supported.")
 
         plan = self._plan_resolver.resolve(durable_job)
+
+        def validate_dispatch_claim(session: Session) -> None:
+            _lock_active_dispatch_claim(
+                session,
+                job_id=durable_job.job_id,
+                experiment_id=durable_job.experiment_id,
+                worker_id=self._worker_id,
+            )
+
         dispatcher = BudgetedProviderDispatcher(
             provider=_ClaimValidatedProvider(
                 provider=self._provider,
@@ -160,6 +203,7 @@ class BudgetedJobProviderInvocation:
             policies=plan.policies,
             estimate=plan.estimate,
             execution_id=durable_job.job_id,
+            dispatch_claim_guard=validate_dispatch_claim,
         )
 
         if not response.succeeded:

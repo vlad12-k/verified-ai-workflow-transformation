@@ -1,8 +1,10 @@
 """Budget-controlled execution of one provider inference attempt."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from decimal import Decimal
 from uuid import UUID
+
+from sqlalchemy.orm import Session
 
 from vait.contracts.budgeting import (
     BudgetConsumption,
@@ -22,6 +24,10 @@ from vait.platform.persistence.repositories.budgets import (
     PostgreSQLBudgetReservationLedger,
 )
 from vait.platform.persistence.session import transactional_session
+
+
+class DispatchClaimRejected(ValueError):
+    """Known pre-dispatch ownership rejection."""
 
 
 class BudgetedProviderDispatcher:
@@ -49,6 +55,7 @@ class BudgetedProviderDispatcher:
         policies: Sequence[BudgetPolicy],
         estimate: BudgetEstimate,
         execution_id: UUID,
+        dispatch_claim_guard: Callable[[Session], None] | None = None,
     ) -> ProviderInferenceResponse:
         """Reserve, dispatch, execute and settle separately."""
 
@@ -79,18 +86,36 @@ class BudgetedProviderDispatcher:
                     "Budget admission did not produce a reserved state."
                 )
 
-        # Transaction 2: persist dispatch BEFORE provider I/O.
+        # Transaction 2: validate the job and dispatch atomically.
+        # A known rejected claim releases reserved capacity before commit.
+        rejected_claim: DispatchClaimRejected | None = None
+
         with transactional_session(self._runtime) as session:
             ledger = PostgreSQLBudgetReservationLedger(session)
-            dispatched = ledger.mark_dispatched(
-                reservation_id,
-                require_new_transition=True,
-            )
 
-            if dispatched.state is not BudgetReservationState.DISPATCHED:
-                raise RuntimeError(
-                    "Budget dispatch did not produce a dispatched state."
+            try:
+                if dispatch_claim_guard is not None:
+                    dispatch_claim_guard(session)
+            except DispatchClaimRejected as exc:
+                released = ledger.release(reservation_id)
+                if released.state is not BudgetReservationState.RELEASED:
+                    raise RuntimeError(
+                        "Rejected dispatch reservation was not released."
+                    ) from exc
+                rejected_claim = exc
+            else:
+                dispatched = ledger.mark_dispatched(
+                    reservation_id,
+                    require_new_transition=True,
                 )
+
+                if dispatched.state is not BudgetReservationState.DISPATCHED:
+                    raise RuntimeError(
+                        "Budget dispatch did not produce a dispatched state."
+                    )
+
+        if rejected_claim is not None:
+            raise rejected_claim
 
         response: ProviderInferenceResponse | None = None
 
