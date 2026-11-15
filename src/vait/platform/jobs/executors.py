@@ -13,13 +13,13 @@ from vait.platform.provider_execution import (
 class ProviderEvidenceWriter(Protocol):
     """Commit provider evidence durably before job success is recorded."""
 
-    def persist(
+    def persist_and_complete(
         self,
         *,
         job: JobRecord,
         response: ProviderInferenceResponse,
-    ) -> None:
-        """Persist evidence or raise on failure."""
+    ) -> JobRecord:
+        """Atomically persist evidence and complete the durable job."""
         ...
 
 
@@ -61,7 +61,7 @@ class BudgetedProviderJobExecutor:
         if not response.succeeded:
             raise ProviderInvocationFailed(response)
 
-        self._evidence_writer.persist(
+        self._evidence_writer.persist_and_complete(
             job=job,
             response=response,
         )

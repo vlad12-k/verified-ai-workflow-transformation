@@ -6,6 +6,8 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from io import StringIO
 from pathlib import Path
+from typing import cast
+from unittest.mock import Mock
 from uuid import UUID, uuid4
 
 import pytest
@@ -16,7 +18,15 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 from sqlalchemy import text
 
+from vait.inference.providers.models import (
+    ProviderInferenceResponse,
+    ProviderTiming,
+)
 from vait.platform.jobs import JobRecord, WorkerService
+from vait.platform.jobs.executors import BudgetedProviderJobExecutor
+from vait.platform.jobs.provider_evidence import (
+    PostgreSQLProviderEvidenceWriter,
+)
 from vait.platform.observability import (
     configure_platform_logging,
     create_tracing_runtime,
@@ -28,9 +38,11 @@ from vait.platform.persistence.engine import (
 )
 from vait.platform.persistence.repositories.jobs import JobRepository
 from vait.platform.persistence.repositories.registry import (
+    EvidenceRepository,
     ExperimentRunRepository,
 )
 from vait.platform.persistence.session import transactional_session
+from vait.platform.provider_execution import BudgetedJobProviderInvocation
 from vait.platform.registry import ExperimentRunRecord
 from vait.platform.settings import PlatformSettings
 
@@ -702,3 +714,225 @@ def test_worker_cannot_report_success_after_lease_expiry(
     assert persisted is not None
     assert persisted.status == "RUNNING"
     assert persisted.finished_at is None
+
+
+
+def _create_provider_worker_job(
+    runtime: DatabaseRuntime,
+) -> JobRecord:
+    """Create one allowlisted single-attempt provider job."""
+    experiment = _create_experiment(runtime)
+    job = JobRecord(
+        job_id=uuid4(),
+        experiment_id=experiment.experiment_id,
+        operation="provider-inference",
+        payload={},
+        idempotency_key=str(uuid4()),
+        max_attempts=1,
+        created_at=datetime.now(UTC),
+    )
+
+    with transactional_session(runtime) as session:
+        JobRepository(session).add(job)
+
+    return job
+
+
+def test_worker_provider_atomic_completion_has_one_success(
+    worker_runtime: DatabaseRuntime,
+) -> None:
+    """Provider worker must not perform a second success transition."""
+    job = _create_provider_worker_job(worker_runtime)
+
+    invocation = Mock(spec=BudgetedJobProviderInvocation)
+    invocation.invoke.return_value = ProviderInferenceResponse(
+        request_id="worker-atomic-request",
+        provider_id="fake-provider",
+        runtime_id="fake-runtime",
+        model_id="fake-model",
+        output_text="synthetic-success",
+        timing=ProviderTiming(total_latency_ms=1.0),
+    )
+
+    executor = BudgetedProviderJobExecutor(
+        invocation=cast(BudgetedJobProviderInvocation, invocation),
+        evidence_writer=PostgreSQLProviderEvidenceWriter(
+            runtime=worker_runtime,
+            worker_id="atomic-worker",
+        ),
+    )
+
+    worker = WorkerService(
+        runtime=worker_runtime,
+        executor=executor,
+        worker_id="atomic-worker",
+        lease_seconds=60,
+        allowed_operations=("provider-inference",),
+    )
+
+    result = worker.run_once(now=datetime.now(UTC))
+
+    assert result.job is not None
+    assert result.job.job_id == job.job_id
+    assert result.job.status == "SUCCEEDED"
+    assert invocation.invoke.call_count == 1
+
+    with transactional_session(worker_runtime) as session:
+        persisted = JobRepository(session).get(job.job_id)
+        records = EvidenceRepository(session).list_for_experiment(
+            job.experiment_id
+        )
+
+    assert persisted is not None
+    assert persisted.status == "SUCCEEDED"
+    assert len(records) == 1
+    assert records[0].payload["job_id"] == str(job.job_id)
+
+
+def test_provider_worker_refuses_success_without_atomic_evidence(
+    worker_runtime: DatabaseRuntime,
+) -> None:
+    """An executor returning normally is not enough for provider success."""
+    job = _create_provider_worker_job(worker_runtime)
+
+    worker = WorkerService(
+        runtime=worker_runtime,
+        executor=SuccessfulExecutor(worker_runtime),
+        worker_id="incomplete-worker",
+        lease_seconds=60,
+        allowed_operations=("provider-inference",),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="lacks durable atomic completion",
+    ):
+        worker.run_once(now=datetime.now(UTC))
+
+    with transactional_session(worker_runtime) as session:
+        persisted = JobRepository(session).get(job.job_id)
+        records = EvidenceRepository(session).list_for_experiment(
+            job.experiment_id
+        )
+
+    assert persisted is not None
+    assert persisted.status == "RUNNING"
+    assert persisted.finished_at is None
+    assert records == ()
+
+
+
+def test_worker_post_commit_crash_does_not_replay(
+    worker_runtime: DatabaseRuntime,
+) -> None:
+    """A crash after atomic commit cannot re-execute a completed job."""
+    job = _create_provider_worker_job(worker_runtime)
+
+    writer = PostgreSQLProviderEvidenceWriter(
+        runtime=worker_runtime,
+        worker_id="crash-worker",
+    )
+
+    class PostCommitCrashExecutor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, claimed: JobRecord) -> None:
+            self.calls += 1
+            completed = writer.persist_and_complete(
+                job=claimed,
+                response=ProviderInferenceResponse(
+                    request_id="post-commit-crash",
+                    provider_id="fake-provider",
+                    runtime_id="fake-runtime",
+                    model_id="fake-model",
+                    output_text="durable-result",
+                    timing=ProviderTiming(total_latency_ms=1.0),
+                ),
+            )
+            assert completed.status == "SUCCEEDED"
+            raise RuntimeError("simulated crash after commit")
+
+    executor = PostCommitCrashExecutor()
+
+    worker = WorkerService(
+        runtime=worker_runtime,
+        executor=executor,
+        worker_id="crash-worker",
+        lease_seconds=60,
+        allowed_operations=("provider-inference",),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Claimed job lost worker ownership",
+    ):
+        worker.run_once(now=datetime.now(UTC))
+
+    with transactional_session(worker_runtime) as session:
+        persisted = JobRepository(session).get(job.job_id)
+        evidence = EvidenceRepository(session).list_for_experiment(
+            job.experiment_id
+        )
+
+    assert persisted is not None
+    assert persisted.status == "SUCCEEDED"
+    assert persisted.finished_at is not None
+    assert len(evidence) == 1
+    assert executor.calls == 1
+
+    next_cycle = worker.run_once(now=datetime.now(UTC))
+
+    assert next_cycle.claimed is False
+    assert next_cycle.job is None
+    assert executor.calls == 1
+
+
+def test_provider_transport_error_is_terminal_without_evidence(
+    worker_runtime: DatabaseRuntime,
+) -> None:
+    """A single-attempt provider job cannot replay uncertain I/O."""
+    job = _create_provider_worker_job(worker_runtime)
+
+    invocation = Mock(spec=BudgetedJobProviderInvocation)
+    invocation.invoke.side_effect = ConnectionError(
+        "simulated provider connection failure"
+    )
+
+    executor = BudgetedProviderJobExecutor(
+        invocation=cast(BudgetedJobProviderInvocation, invocation),
+        evidence_writer=PostgreSQLProviderEvidenceWriter(
+            runtime=worker_runtime,
+            worker_id="failure-worker",
+        ),
+    )
+
+    worker = WorkerService(
+        runtime=worker_runtime,
+        executor=executor,
+        worker_id="failure-worker",
+        lease_seconds=60,
+        allowed_operations=("provider-inference",),
+    )
+
+    result = worker.run_once(now=datetime.now(UTC))
+
+    assert result.job is not None
+    assert result.job.status == "FAILED"
+    assert result.job.attempt == 1
+    assert result.job.error_code == "ConnectionError"
+
+    with transactional_session(worker_runtime) as session:
+        persisted = JobRepository(session).get(job.job_id)
+        evidence = EvidenceRepository(session).list_for_experiment(
+            job.experiment_id
+        )
+
+    assert persisted is not None
+    assert persisted.status == "FAILED"
+    assert evidence == ()
+
+    next_cycle = worker.run_once(now=datetime.now(UTC))
+    assert next_cycle.claimed is False
+
+    invocation.invoke.assert_called_once()

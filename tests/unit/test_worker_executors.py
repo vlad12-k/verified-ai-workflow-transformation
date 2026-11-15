@@ -25,15 +25,21 @@ class RecordingEvidenceWriter:
         self.saved: list[tuple[JobRecord, ProviderInferenceResponse]] = []
         self.fail = fail
 
-    def persist(
+    def persist_and_complete(
         self,
         *,
         job: JobRecord,
         response: ProviderInferenceResponse,
-    ) -> None:
+    ) -> JobRecord:
         if self.fail:
             raise OSError("Evidence persistence failed")
         self.saved.append((job, response))
+        return job.model_copy(
+            update={
+                "status": "SUCCEEDED",
+                "finished_at": datetime.now(UTC),
+            }
+        )
 
 
 def make_job(

@@ -11,6 +11,7 @@ from vait.inference.providers.models import ProviderInferenceResponse
 from vait.platform.jobs.models import JobRecord
 from vait.platform.persistence.engine import DatabaseRuntime
 from vait.platform.persistence.job_models import JobRow
+from vait.platform.persistence.repositories.jobs import JobRepository
 from vait.platform.persistence.repositories.registry import EvidenceRepository
 from vait.platform.persistence.session import transactional_session
 from vait.platform.registry.contracts import EvidenceRecord
@@ -70,7 +71,39 @@ class PostgreSQLProviderEvidenceWriter:
         job: JobRecord,
         response: ProviderInferenceResponse,
     ) -> None:
-        """Atomically check claim ownership and persist idempotent evidence."""
+        """Persist evidence without changing the job lifecycle."""
+        self._persist(
+            job=job,
+            response=response,
+            complete_job=False,
+        )
+
+    def persist_and_complete(
+        self,
+        *,
+        job: JobRecord,
+        response: ProviderInferenceResponse,
+    ) -> JobRecord:
+        """Commit inference evidence and SUCCEEDED in one transaction."""
+        completed = self._persist(
+            job=job,
+            response=response,
+            complete_job=True,
+        )
+
+        if completed is None:
+            raise RuntimeError("Atomic completion produced no job result")
+
+        return completed
+
+    def _persist(
+        self,
+        *,
+        job: JobRecord,
+        response: ProviderInferenceResponse,
+        complete_job: bool,
+    ) -> JobRecord | None:
+        """Validate ownership and write evidence under one row lock."""
         if (
             job.operation != "provider-inference"
             or job.status != "RUNNING"
@@ -128,6 +161,22 @@ class PostgreSQLProviderEvidenceWriter:
                     or existing.payload != evidence.payload
                 ):
                     raise RuntimeError("Conflicting provider evidence for job")
-                return
+            else:
+                repository.add(evidence)
 
-            repository.add(evidence)
+            if complete_job:
+                completed = JobRepository(session).mark_succeeded(
+                    job_id=job.job_id,
+                    worker_id=self._worker_id,
+                    expected_attempt=job.attempt,
+                    now=datetime.now(UTC),
+                )
+
+                if completed is None:
+                    raise RuntimeError(
+                        "Atomic completion lost its active job claim"
+                    )
+
+                return completed
+
+        return None

@@ -1358,3 +1358,156 @@ def test_provider_evidence_writer_rejects_conflicting_replay(
     assert records[0].payload["output_sha256"] == sha256(
         response.output_text.encode("utf-8")
     ).hexdigest()
+
+
+
+def test_atomic_completion_commits_evidence_and_success(
+    jobs_runtime: DatabaseRuntime,
+) -> None:
+    job = _provider_evidence_claim(jobs_runtime)
+    writer = PostgreSQLProviderEvidenceWriter(
+        runtime=jobs_runtime,
+        worker_id="evidence-worker",
+    )
+
+    completed = writer.persist_and_complete(
+        job=job,
+        response=_provider_evidence_response(),
+    )
+
+    with transactional_session(jobs_runtime) as session:
+        persisted = JobRepository(session).get(job.job_id)
+        records = EvidenceRepository(session).list_for_experiment(
+            job.experiment_id
+        )
+
+    assert completed.status == "SUCCEEDED"
+    assert persisted is not None
+    assert persisted.status == "SUCCEEDED"
+    assert persisted.finished_at is not None
+    assert len(records) == 1
+    assert records[0].payload["job_id"] == str(job.job_id)
+
+
+def test_atomic_completion_rolls_back_on_transition_rejection(
+    jobs_runtime: DatabaseRuntime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job = _provider_evidence_claim(jobs_runtime)
+    writer = PostgreSQLProviderEvidenceWriter(
+        runtime=jobs_runtime,
+        worker_id="evidence-worker",
+    )
+
+    def reject_completion(
+        self: JobRepository,
+        *,
+        job_id: UUID,
+        worker_id: str,
+        expected_attempt: int,
+        now: datetime,
+    ) -> JobRecord | None:
+        return None
+
+    monkeypatch.setattr(
+        JobRepository,
+        "mark_succeeded",
+        reject_completion,
+    )
+
+    with pytest.raises(RuntimeError, match="lost its active job claim"):
+        writer.persist_and_complete(
+            job=job,
+            response=_provider_evidence_response(),
+        )
+
+    with transactional_session(jobs_runtime) as session:
+        persisted = JobRepository(session).get(job.job_id)
+        records = EvidenceRepository(session).list_for_experiment(
+            job.experiment_id
+        )
+
+    assert persisted is not None
+    assert persisted.status == "RUNNING"
+    assert records == ()
+
+
+def test_atomic_completion_reuses_identical_evidence(
+    jobs_runtime: DatabaseRuntime,
+) -> None:
+    job = _provider_evidence_claim(jobs_runtime)
+    response = _provider_evidence_response()
+    writer = PostgreSQLProviderEvidenceWriter(
+        runtime=jobs_runtime,
+        worker_id="evidence-worker",
+    )
+
+    writer.persist(job=job, response=response)
+    completed = writer.persist_and_complete(
+        job=job,
+        response=response,
+    )
+
+    with transactional_session(jobs_runtime) as session:
+        records = EvidenceRepository(session).list_for_experiment(
+            job.experiment_id
+        )
+
+    assert completed.status == "SUCCEEDED"
+    assert len(records) == 1
+
+
+def test_atomic_completion_rejects_conflicting_evidence(
+    jobs_runtime: DatabaseRuntime,
+) -> None:
+    job = _provider_evidence_claim(jobs_runtime)
+    response = _provider_evidence_response()
+    writer = PostgreSQLProviderEvidenceWriter(
+        runtime=jobs_runtime,
+        worker_id="evidence-worker",
+    )
+
+    writer.persist(job=job, response=response)
+
+    changed = response.model_copy(
+        update={"output_text": "conflicting-result"}
+    )
+
+    with pytest.raises(RuntimeError, match="Conflicting provider evidence"):
+        writer.persist_and_complete(job=job, response=changed)
+
+    with transactional_session(jobs_runtime) as session:
+        persisted = JobRepository(session).get(job.job_id)
+        records = EvidenceRepository(session).list_for_experiment(
+            job.experiment_id
+        )
+
+    assert persisted is not None
+    assert persisted.status == "RUNNING"
+    assert len(records) == 1
+
+
+def test_atomic_completion_rejects_expired_claim(
+    jobs_runtime: DatabaseRuntime,
+) -> None:
+    job = _provider_evidence_claim(jobs_runtime, expired=True)
+    writer = PostgreSQLProviderEvidenceWriter(
+        runtime=jobs_runtime,
+        worker_id="evidence-worker",
+    )
+
+    with pytest.raises(RuntimeError, match="active first-attempt claim"):
+        writer.persist_and_complete(
+            job=job,
+            response=_provider_evidence_response(),
+        )
+
+    with transactional_session(jobs_runtime) as session:
+        persisted = JobRepository(session).get(job.job_id)
+        records = EvidenceRepository(session).list_for_experiment(
+            job.experiment_id
+        )
+
+    assert persisted is not None
+    assert persisted.status == "RUNNING"
+    assert records == ()
