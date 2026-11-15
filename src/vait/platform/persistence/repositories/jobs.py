@@ -354,11 +354,57 @@ class JobRepository(Repository[JobRecord, UUID]):
 
         return _job_record(row)
 
+    def requeue_ready_retries(
+        self,
+        *,
+        limit: int = 100,
+        allowed_operations: tuple[str, ...] | None = None,
+    ) -> list[JobRecord]:
+        """Requeue only eligible retry-pending jobs under row locks."""
+        if limit < 1:
+            raise ValueError("limit must be positive")
+
+        if allowed_operations is not None and (
+            not allowed_operations
+            or any(
+                not operation
+                or operation.strip() != operation
+                or len(operation) > 128
+                for operation in allowed_operations
+            )
+        ):
+            raise ValueError("Invalid allowed_operations")
+
+        statement = (
+            select(JobRow)
+            .where(
+                JobRow.status == "RETRY_PENDING",
+                JobRow.attempt < JobRow.max_attempts,
+            )
+            .order_by(JobRow.created_at, JobRow.job_id)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+
+        if allowed_operations is not None:
+            statement = statement.where(
+                JobRow.operation.in_(allowed_operations)
+            )
+
+        rows = list(self.session.scalars(statement))
+
+        for row in rows:
+            row.status = "PENDING"
+
+        self.session.flush()
+        return [_job_record(row) for row in rows]
+
     def recover_expired_leases(
         self,
         *,
         now: datetime,
         limit: int = 100,
+        allowed_operations: tuple[str, ...] | None = None,
     ) -> list[JobRecord]:
         """Recover running jobs whose worker lease has expired."""
         if now.tzinfo is None or now.utcoffset() is None:
@@ -370,6 +416,17 @@ class JobRepository(Repository[JobRecord, UUID]):
             raise ValueError(
                 "limit must be positive"
             )
+
+        if allowed_operations is not None and (
+            not allowed_operations
+            or any(
+                not operation
+                or operation.strip() != operation
+                or len(operation) > 128
+                for operation in allowed_operations
+            )
+        ):
+            raise ValueError("Invalid allowed_operations")
 
         statement = (
             select(JobRow)
@@ -386,6 +443,11 @@ class JobRepository(Repository[JobRecord, UUID]):
                 skip_locked=True,
             )
         )
+
+        if allowed_operations is not None:
+            statement = statement.where(
+                JobRow.operation.in_(allowed_operations)
+            )
 
         rows = list(
             self.session.scalars(statement)

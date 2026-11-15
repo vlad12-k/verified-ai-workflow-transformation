@@ -936,3 +936,135 @@ def test_provider_transport_error_is_terminal_without_evidence(
     assert next_cycle.claimed is False
 
     invocation.invoke.assert_called_once()
+
+
+
+def test_worker_recovers_expired_retry_after_restart(
+    worker_runtime: DatabaseRuntime,
+) -> None:
+    """A replacement worker can resume an eligible expired job."""
+    experiment = _create_experiment(worker_runtime)
+    job = _create_job(
+        worker_runtime,
+        experiment_id=experiment.experiment_id,
+        max_attempts=2,
+    )
+
+    with transactional_session(worker_runtime) as session:
+        first = JobRepository(session).claim_next(
+            worker_id="dead-worker",
+            now=datetime.now(UTC) - timedelta(minutes=2),
+            lease_seconds=60,
+            allowed_operations=("verification",),
+        )
+
+    assert first is not None
+    assert first.attempt == 1
+
+    executor = SuccessfulExecutor(worker_runtime)
+    replacement = WorkerService(
+        runtime=worker_runtime,
+        executor=executor,
+        worker_id="replacement-worker",
+        lease_seconds=60,
+        allowed_operations=("verification",),
+    )
+
+    result = replacement.run_once(now=datetime.now(UTC))
+
+    assert result.claimed is True
+    assert result.job is not None
+    assert result.job.job_id == job.job_id
+    assert result.job.status == "SUCCEEDED"
+    assert result.job.attempt == 2
+    assert result.job.claimed_by == "replacement-worker"
+    assert executor.seen_job_ids == [job.job_id]
+
+
+def test_worker_recovery_does_not_replay_provider_job(
+    worker_runtime: DatabaseRuntime,
+) -> None:
+    """An expired single-attempt provider job becomes FAILED, not retried."""
+    job = _create_provider_worker_job(worker_runtime)
+
+    with transactional_session(worker_runtime) as session:
+        first = JobRepository(session).claim_next(
+            worker_id="dead-provider",
+            now=datetime.now(UTC) - timedelta(minutes=2),
+            lease_seconds=60,
+            allowed_operations=("provider-inference",),
+        )
+
+    assert first is not None
+    assert first.attempt == 1
+
+    executor = SuccessfulExecutor(worker_runtime)
+    replacement = WorkerService(
+        runtime=worker_runtime,
+        executor=executor,
+        worker_id="replacement-provider",
+        lease_seconds=60,
+        allowed_operations=("provider-inference",),
+    )
+
+    result = replacement.run_once(now=datetime.now(UTC))
+
+    assert result.claimed is False
+    assert executor.seen_job_ids == []
+
+    with transactional_session(worker_runtime) as session:
+        persisted = JobRepository(session).get(job.job_id)
+        records = EvidenceRepository(session).list_for_experiment(
+            job.experiment_id
+        )
+
+    assert persisted is not None
+    assert persisted.status == "FAILED"
+    assert persisted.attempt == 1
+    assert persisted.error_code == "LEASE_EXPIRED"
+    assert records == ()
+
+
+def test_worker_recovery_respects_operation_allowlist(
+    worker_runtime: DatabaseRuntime,
+) -> None:
+    """A verification worker cannot recover unrelated provider work."""
+    provider_job = _create_provider_worker_job(worker_runtime)
+
+    with transactional_session(worker_runtime) as session:
+        claimed = JobRepository(session).claim_next(
+            worker_id="old-provider",
+            now=datetime.now(UTC) - timedelta(minutes=2),
+            lease_seconds=60,
+            allowed_operations=("provider-inference",),
+        )
+
+    assert claimed is not None
+
+    experiment = _create_experiment(worker_runtime)
+    verification_job = _create_job(
+        worker_runtime,
+        experiment_id=experiment.experiment_id,
+    )
+
+    executor = SuccessfulExecutor(worker_runtime)
+    worker = WorkerService(
+        runtime=worker_runtime,
+        executor=executor,
+        worker_id="verification-only",
+        lease_seconds=60,
+        allowed_operations=("verification",),
+    )
+
+    result = worker.run_once(now=datetime.now(UTC))
+
+    assert result.job is not None
+    assert result.job.job_id == verification_job.job_id
+    assert result.job.status == "SUCCEEDED"
+
+    with transactional_session(worker_runtime) as session:
+        untouched = JobRepository(session).get(provider_job.job_id)
+
+    assert untouched is not None
+    assert untouched.status == "RUNNING"
+    assert untouched.claimed_by == "old-provider"

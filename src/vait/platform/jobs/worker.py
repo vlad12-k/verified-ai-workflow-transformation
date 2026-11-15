@@ -82,6 +82,17 @@ class WorkerService:
             self._runtime
         ) as session:
             repository = JobRepository(session)
+
+            # Recover abandoned leases and requeue eligible work.
+            # Both maintenance steps commit before execution.
+            repository.recover_expired_leases(
+                now=utc_now(),
+                allowed_operations=self._allowed_operations,
+            )
+            repository.requeue_ready_retries(
+                allowed_operations=self._allowed_operations,
+            )
+
             if self._allowed_operations is None:
                 claimed = repository.claim_next(
                     worker_id=self._worker_id,
