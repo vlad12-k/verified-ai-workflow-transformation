@@ -1,9 +1,10 @@
 """Platform boundary for budgeted inference from durable job context."""
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
+
+from sqlalchemy import func, select
 
 from vait.contracts.budgeting import BudgetEstimate, BudgetPolicy
 from vait.inference.providers.base import InferenceProvider
@@ -52,13 +53,17 @@ def _require_active_job_claim(
     """Load and validate the current durable claim for a worker."""
     with transactional_session(runtime) as session:
         durable_job = JobRepository(session).get(job_id)
+        database_now = session.scalar(
+            select(func.clock_timestamp())
+        )
 
     if (
         durable_job is None
         or durable_job.status != "RUNNING"
         or durable_job.claimed_by != worker_id
         or durable_job.lease_expires_at is None
-        or durable_job.lease_expires_at <= datetime.now(UTC)
+        or database_now is None
+        or durable_job.lease_expires_at <= database_now
     ):
         raise ValueError("Provider invocation requires an active durable job claim.")
 

@@ -88,6 +88,10 @@ class FakeJobSession:
             return self.job
         return None
 
+    def scalar(self, statement: object) -> datetime:
+        del statement
+        return datetime.now(UTC)
+
     def commit(self) -> None:
         pass
 
@@ -353,3 +357,47 @@ def test_normalised_provider_failure_is_not_reported_as_job_success(
         invocation.invoke(job)
 
     assert len(provider.requests) == 1
+
+
+
+def test_database_clock_rejects_expired_provider_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Database time, not worker time, decides lease expiry."""
+    monkeypatch.setattr(
+        provider_execution,
+        "BudgetedProviderDispatcher",
+        RecordingDispatcher,
+    )
+
+    def future_database_clock(
+        self: FakeJobSession,
+        statement: object,
+    ) -> datetime:
+        del self, statement
+        return datetime.now(UTC) + timedelta(minutes=5)
+
+    monkeypatch.setattr(
+        FakeJobSession,
+        "scalar",
+        future_database_clock,
+    )
+
+    provider = RecordingProvider()
+    resolver = RecordingResolver(_plan())
+    job = _claimed_job(
+        lease_offset=timedelta(minutes=1),
+    )
+
+    invocation = provider_execution.BudgetedJobProviderInvocation(
+        provider=provider,
+        runtime=_runtime_with_job(job),
+        plan_resolver=resolver,
+        worker_id="worker-01",
+    )
+
+    with pytest.raises(ValueError, match="durable job claim"):
+        invocation.invoke(job)
+
+    assert resolver.jobs == []
+    assert provider.requests == []
