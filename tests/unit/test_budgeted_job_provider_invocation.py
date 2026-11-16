@@ -10,6 +10,8 @@ import pytest
 
 import vait.platform.provider_execution as provider_execution
 from vait.contracts.budgeting import BudgetEstimate, BudgetPolicy
+from vait.inference.providers.base import InferenceProvider
+from vait.inference.providers.cache import DeterministicCachingProvider
 from vait.inference.providers.models import (
     InferenceMessage,
     InferenceRole,
@@ -19,11 +21,13 @@ from vait.inference.providers.models import (
     ProviderTiming,
     ProviderTokenUsage,
 )
+from vait.inference.providers.openai_compatible import OpenAICompatibleProvider
 from vait.platform.jobs.models import JobRecord
 from vait.platform.persistence.engine import DatabaseRuntime
 from vait.platform.provider_dispatch_policy import (
     DispatchSafetyMode,
     ProviderDispatchPolicy,
+    ProviderDispatchPolicyError,
     ProviderLocation,
 )
 
@@ -197,6 +201,25 @@ def _claimed_job(
 
 def _runtime_with_job(job: JobRecord | None) -> DatabaseRuntime:
     return cast(DatabaseRuntime, FakeDatabaseRuntime(job))
+
+
+@pytest.fixture(autouse=True)
+def _classify_recording_test_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Trust only the existing in-memory fake in this test module."""
+    original = provider_execution.classify_builtin_provider
+
+    def classifier(provider: InferenceProvider) -> ProviderLocation:
+        if type(provider) is RecordingProvider:
+            return ProviderLocation.LOCAL
+        return original(provider)
+
+    monkeypatch.setattr(
+        provider_execution,
+        "classify_builtin_provider",
+        classifier,
+    )
 
 
 def test_invocation_uses_the_durable_job_id_as_dispatch_identity(
@@ -495,3 +518,87 @@ def test_invocation_rejects_unsafe_dispatch_policy(
 
     assert provider.requests == []
     assert resolver.jobs == []
+
+
+
+def test_local_policy_rejects_real_remote_adapter() -> None:
+    """A remote HTTP adapter cannot claim a local-only permission."""
+    job = _claimed_job()
+    provider = object.__new__(OpenAICompatibleProvider)
+
+    with pytest.raises(
+        ProviderDispatchPolicyError,
+        match="does not match adapter identity",
+    ):
+        provider_execution.BudgetedJobProviderInvocation(
+            provider=provider,
+            runtime=_runtime_with_job(job),
+            plan_resolver=RecordingResolver(_plan()),
+            worker_id="worker-01",
+            dispatch_policy=_TEST_POLICY,
+        )
+
+
+def test_cached_remote_adapter_cannot_claim_local_identity() -> None:
+    """A cache wrapper cannot disguise a remote HTTP provider."""
+    job = _claimed_job()
+    provider = DeterministicCachingProvider(
+        provider=object.__new__(OpenAICompatibleProvider),
+    )
+
+    with pytest.raises(
+        ProviderDispatchPolicyError,
+        match="does not match adapter identity",
+    ):
+        provider_execution.BudgetedJobProviderInvocation(
+            provider=provider,
+            runtime=_runtime_with_job(job),
+            plan_resolver=RecordingResolver(_plan()),
+            worker_id="worker-01",
+            dispatch_policy=_TEST_POLICY,
+        )
+
+
+def test_unknown_adapter_is_rejected_despite_spoofed_identity() -> None:
+    """Matching provider identifiers do not establish adapter trust."""
+    class SpoofedProvider(RecordingProvider):
+        pass
+
+    job = _claimed_job()
+
+    with pytest.raises(
+        ProviderDispatchPolicyError,
+        match="Unknown provider adapter",
+    ):
+        provider_execution.BudgetedJobProviderInvocation(
+            provider=SpoofedProvider(),
+            runtime=_runtime_with_job(job),
+            plan_resolver=RecordingResolver(_plan()),
+            worker_id="worker-01",
+            dispatch_policy=_TEST_POLICY,
+        )
+
+
+def test_real_remote_adapter_accepts_explicit_remote_policy() -> None:
+    """Verified remote type and explicit remote policy may be composed."""
+    job = _claimed_job()
+
+    policy = ProviderDispatchPolicy(
+        location=ProviderLocation.REMOTE,
+        mode=DispatchSafetyMode.REMOTE_RISK_ACCEPTED,
+        residual_risk_accepted=True,
+        internal_retries_verified_disabled=True,
+    )
+
+    invocation = provider_execution.BudgetedJobProviderInvocation(
+        provider=object.__new__(OpenAICompatibleProvider),
+        runtime=_runtime_with_job(job),
+        plan_resolver=RecordingResolver(_plan()),
+        worker_id="worker-01",
+        dispatch_policy=policy,
+    )
+
+    assert isinstance(
+        invocation,
+        provider_execution.BudgetedJobProviderInvocation,
+    )

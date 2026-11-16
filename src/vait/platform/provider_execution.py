@@ -22,7 +22,13 @@ from vait.platform.persistence.engine import DatabaseRuntime
 from vait.platform.persistence.job_models import JobRow
 from vait.platform.persistence.repositories.jobs import JobRepository
 from vait.platform.persistence.session import transactional_session
-from vait.platform.provider_dispatch_policy import ProviderDispatchPolicy
+from vait.platform.provider_dispatch_policy import (
+    ProviderDispatchPolicy,
+    ProviderDispatchPolicyError,
+)
+from vait.platform.provider_identity import (
+    classify_builtin_provider as classify_builtin_provider,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +172,13 @@ class BudgetedJobProviderInvocation:
             raise ValueError("worker_id must not be empty")
 
         dispatch_policy.validate()
+
+        actual_location = classify_builtin_provider(provider)
+
+        if actual_location is not dispatch_policy.location:
+            raise ProviderDispatchPolicyError(
+                "Provider location does not match adapter identity."
+            )
 
         self._dispatch_policy = dispatch_policy
         self._provider = provider

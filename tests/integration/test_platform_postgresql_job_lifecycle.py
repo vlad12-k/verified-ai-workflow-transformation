@@ -23,6 +23,7 @@ from vait.contracts.budgeting import (
     BudgetReservationRequest,
     BudgetReservationState,
 )
+from vait.inference.providers.base import InferenceProvider
 from vait.inference.providers.cache import DeterministicCachingProvider
 from vait.inference.providers.models import (
     InferenceMessage,
@@ -547,6 +548,33 @@ class DatabaseCheckingProvider:
             usage=ProviderTokenUsage(input_tokens=3, output_tokens=2),
             timing=ProviderTiming(total_latency_ms=1.0),
         )
+
+
+@pytest.fixture(autouse=True)
+def _classify_postgresql_fake_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Allow only known fake providers for lifecycle integration tests."""
+    original = provider_execution.classify_builtin_provider
+
+    def classifier(provider: InferenceProvider) -> ProviderLocation:
+        current = provider
+
+        for _ in range(8):
+            if not isinstance(current, DeterministicCachingProvider):
+                break
+            current = current._provider
+
+        if isinstance(current, DatabaseCheckingProvider):
+            return ProviderLocation.LOCAL
+
+        return original(provider)
+
+    monkeypatch.setattr(
+        provider_execution,
+        "classify_builtin_provider",
+        classifier,
+    )
 
 
 class StaticProviderBudgetPlanResolver:
