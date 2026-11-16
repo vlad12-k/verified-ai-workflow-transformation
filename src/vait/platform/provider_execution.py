@@ -22,6 +22,7 @@ from vait.platform.persistence.engine import DatabaseRuntime
 from vait.platform.persistence.job_models import JobRow
 from vait.platform.persistence.repositories.jobs import JobRepository
 from vait.platform.persistence.session import transactional_session
+from vait.platform.provider_dispatch_policy import ProviderDispatchPolicy
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,10 +160,14 @@ class BudgetedJobProviderInvocation:
         runtime: DatabaseRuntime,
         plan_resolver: ProviderBudgetPlanResolver,
         worker_id: str,
+        dispatch_policy: ProviderDispatchPolicy,
     ) -> None:
         if not worker_id:
             raise ValueError("worker_id must not be empty")
 
+        dispatch_policy.validate()
+
+        self._dispatch_policy = dispatch_policy
         self._provider = provider
         self._runtime = runtime
         self._plan_resolver = plan_resolver

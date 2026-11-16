@@ -52,6 +52,11 @@ from vait.platform.persistence.repositories.registry import (
 from vait.platform.persistence.session import (
     transactional_session,
 )
+from vait.platform.provider_dispatch_policy import (
+    DispatchSafetyMode,
+    ProviderDispatchPolicy,
+    ProviderLocation,
+)
 from vait.platform.provider_execution import (
     BudgetedJobProviderInvocation,
     ProviderBudgetPlan,
@@ -61,6 +66,11 @@ from vait.platform.registry import ExperimentRunRecord
 from vait.platform.settings import PlatformSettings
 
 _PROVIDER_WORKER_ID = "provider-worker-test"
+
+_TEST_POLICY = ProviderDispatchPolicy(
+    location=ProviderLocation.LOCAL,
+    mode=DispatchSafetyMode.LOCAL_ONLY,
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _ALEMBIC_INI = _ROOT / "alembic.ini"
@@ -703,6 +713,7 @@ def test_budgeted_job_invocation_commits_admission_before_provider_io(
         runtime=jobs_runtime,
         plan_resolver=StaticProviderBudgetPlanResolver(plan),
         worker_id=_PROVIDER_WORKER_ID,
+        dispatch_policy=_TEST_POLICY,
     )
 
     response = invocation.invoke(job)
@@ -743,6 +754,7 @@ def test_budgeted_job_invocation_denies_before_provider_io(
         runtime=jobs_runtime,
         plan_resolver=StaticProviderBudgetPlanResolver(plan),
         worker_id=_PROVIDER_WORKER_ID,
+        dispatch_policy=_TEST_POLICY,
     )
 
     with pytest.raises(BudgetDeniedError):
@@ -789,6 +801,7 @@ def test_unpersisted_job_record_cannot_reach_provider_io(
         runtime=jobs_runtime,
         plan_resolver=resolver,
         worker_id=_PROVIDER_WORKER_ID,
+        dispatch_policy=_TEST_POLICY,
     )
 
     with pytest.raises(ValueError, match="active durable job claim"):
@@ -831,6 +844,7 @@ def test_recovered_job_claim_cannot_reach_provider_io(
         runtime=jobs_runtime,
         plan_resolver=resolver,
         worker_id=_PROVIDER_WORKER_ID,
+        dispatch_policy=_TEST_POLICY,
     )
 
     with pytest.raises(ValueError, match="active durable job claim"):
@@ -860,6 +874,7 @@ def test_claim_recovered_during_plan_resolution_prevents_provider_io(
         runtime=jobs_runtime,
         plan_resolver=resolver,
         worker_id=_PROVIDER_WORKER_ID,
+        dispatch_policy=_TEST_POLICY,
     )
 
     with pytest.raises(ValueError, match="active durable job claim"):
@@ -892,6 +907,7 @@ def test_budgeted_job_invocation_blocks_replay_for_the_same_job(
         runtime=jobs_runtime,
         plan_resolver=StaticProviderBudgetPlanResolver(plan),
         worker_id=_PROVIDER_WORKER_ID,
+        dispatch_policy=_TEST_POLICY,
     )
 
     assert invocation.invoke(job).succeeded
@@ -921,6 +937,7 @@ def test_concurrent_budgeted_job_replay_calls_provider_once(
         runtime=jobs_runtime,
         plan_resolver=resolver,
         worker_id=_PROVIDER_WORKER_ID,
+        dispatch_policy=_TEST_POLICY,
     )
 
     def invoke_or_capture() -> tuple[ProviderInferenceResponse | None, Exception | None]:
@@ -961,6 +978,7 @@ def test_provider_exception_settles_unknown_consumption_for_the_job(
         runtime=jobs_runtime,
         plan_resolver=StaticProviderBudgetPlanResolver(plan),
         worker_id=_PROVIDER_WORKER_ID,
+        dispatch_policy=_TEST_POLICY,
     )
 
     with pytest.raises(ConnectionError, match="Simulated provider transport failure"):
@@ -996,6 +1014,7 @@ def test_normalised_provider_failure_settles_unknown_consumption(
         runtime=jobs_runtime,
         plan_resolver=StaticProviderBudgetPlanResolver(plan),
         worker_id=_PROVIDER_WORKER_ID,
+        dispatch_policy=_TEST_POLICY,
     )
 
     with pytest.raises(ProviderInvocationFailed) as captured:
@@ -1042,6 +1061,7 @@ def test_cache_hits_and_bypasses_still_require_budget_admission(
             runtime=jobs_runtime,
             plan_resolver=StaticProviderBudgetPlanResolver(plan),
             worker_id=_PROVIDER_WORKER_ID,
+            dispatch_policy=_TEST_POLICY,
         )
 
         if request_id == "denied-cache-bypass":
@@ -1579,6 +1599,7 @@ def test_dispatch_rejects_claim_revoked_after_admission(
         runtime=jobs_runtime,
         plan_resolver=StaticProviderBudgetPlanResolver(plan),
         worker_id=_PROVIDER_WORKER_ID,
+        dispatch_policy=_TEST_POLICY,
     )
 
     with pytest.raises(
@@ -1656,6 +1677,7 @@ def test_revocation_after_dispatch_before_provider_check_blocks_io(
         runtime=jobs_runtime,
         plan_resolver=StaticProviderBudgetPlanResolver(plan),
         worker_id=_PROVIDER_WORKER_ID,
+        dispatch_policy=_TEST_POLICY,
     )
 
     with ThreadPoolExecutor(max_workers=1) as executor:
@@ -1777,6 +1799,7 @@ def test_pause_after_final_claim_check_exposes_late_provider_io(
         runtime=jobs_runtime,
         plan_resolver=StaticProviderBudgetPlanResolver(plan),
         worker_id=_PROVIDER_WORKER_ID,
+        dispatch_policy=_TEST_POLICY,
     )
 
     with ThreadPoolExecutor(max_workers=1) as executor:

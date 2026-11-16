@@ -21,6 +21,16 @@ from vait.inference.providers.models import (
 )
 from vait.platform.jobs.models import JobRecord
 from vait.platform.persistence.engine import DatabaseRuntime
+from vait.platform.provider_dispatch_policy import (
+    DispatchSafetyMode,
+    ProviderDispatchPolicy,
+    ProviderLocation,
+)
+
+_TEST_POLICY = ProviderDispatchPolicy(
+    location=ProviderLocation.LOCAL,
+    mode=DispatchSafetyMode.LOCAL_ONLY,
+)
 
 
 class RecordingProvider:
@@ -217,6 +227,7 @@ def test_invocation_uses_the_durable_job_id_as_dispatch_identity(
         runtime=_runtime_with_job(job),
         plan_resolver=resolver,
         worker_id="worker-01",
+        dispatch_policy=_TEST_POLICY,
     )
 
     response = invocation.invoke(job)
@@ -248,6 +259,7 @@ def test_retry_attempt_is_rejected_before_resolving_or_calling_provider(
         runtime=_runtime_with_job(job),
         plan_resolver=resolver,
         worker_id="worker-01",
+        dispatch_policy=_TEST_POLICY,
     )
 
     with pytest.raises(ValueError, match="first durable job attempt"):
@@ -273,6 +285,7 @@ def test_unpersisted_job_record_is_rejected_before_resolving_or_provider_io(
         runtime=_runtime_with_job(None),
         plan_resolver=resolver,
         worker_id="worker-01",
+        dispatch_policy=_TEST_POLICY,
     )
 
     with pytest.raises(ValueError, match="durable job claim"):
@@ -299,6 +312,7 @@ def test_expired_job_lease_is_rejected_before_resolving_or_provider_io(
         runtime=_runtime_with_job(expired_job),
         plan_resolver=resolver,
         worker_id="worker-01",
+        dispatch_policy=_TEST_POLICY,
     )
 
     with pytest.raises(ValueError, match="durable job claim"):
@@ -325,6 +339,7 @@ def test_claim_owned_by_another_worker_is_rejected_before_provider_io(
         runtime=_runtime_with_job(job),
         plan_resolver=resolver,
         worker_id="worker-02",
+        dispatch_policy=_TEST_POLICY,
     )
 
     with pytest.raises(ValueError, match="active durable job claim"):
@@ -351,6 +366,7 @@ def test_normalised_provider_failure_is_not_reported_as_job_success(
         runtime=_runtime_with_job(job),
         plan_resolver=RecordingResolver(_plan()),
         worker_id="worker-01",
+        dispatch_policy=_TEST_POLICY,
     )
 
     with pytest.raises(RuntimeError, match="unsuccessful provider response"):
@@ -394,6 +410,7 @@ def test_database_clock_rejects_expired_provider_claim(
         runtime=_runtime_with_job(job),
         plan_resolver=resolver,
         worker_id="worker-01",
+        dispatch_policy=_TEST_POLICY,
     )
 
     with pytest.raises(ValueError, match="durable job claim"):
@@ -425,6 +442,7 @@ def test_verification_job_cannot_dispatch_provider(
         runtime=_runtime_with_job(job),
         plan_resolver=resolver,
         worker_id="worker-01",
+        dispatch_policy=_TEST_POLICY,
     )
 
     with pytest.raises(ValueError, match="active durable job claim"):
@@ -432,3 +450,48 @@ def test_verification_job_cannot_dispatch_provider(
 
     assert resolver.jobs == []
     assert provider.requests == []
+
+
+
+@pytest.mark.parametrize(
+    ("policy", "message"),
+    [
+        (
+            ProviderDispatchPolicy(
+                location=ProviderLocation.REMOTE,
+                mode=DispatchSafetyMode.REMOTE_RISK_ACCEPTED,
+                internal_retries_verified_disabled=True,
+            ),
+            "explicit risk acceptance",
+        ),
+        (
+            ProviderDispatchPolicy(
+                location=ProviderLocation.REMOTE,
+                mode=DispatchSafetyMode.STRICT_NO_LATE_IO,
+                residual_risk_accepted=True,
+                internal_retries_verified_disabled=True,
+            ),
+            "receiver-side fencing",
+        ),
+    ],
+)
+def test_invocation_rejects_unsafe_dispatch_policy(
+    policy: ProviderDispatchPolicy,
+    message: str,
+) -> None:
+    """Unsafe policy cannot construct provider invocation."""
+    provider = RecordingProvider()
+    resolver = RecordingResolver(_plan())
+    job = _claimed_job()
+
+    with pytest.raises(ValueError, match=message):
+        provider_execution.BudgetedJobProviderInvocation(
+            provider=provider,
+            runtime=_runtime_with_job(job),
+            plan_resolver=resolver,
+            worker_id="worker-01",
+            dispatch_policy=policy,
+        )
+
+    assert provider.requests == []
+    assert resolver.jobs == []
