@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 
+import pytest
 from pydantic import JsonValue
 
 from vait.inference.providers.models import (
@@ -13,6 +14,14 @@ from vait.inference.providers.openai_compatible import (
     OpenAICompatibleHttpResponse,
     OpenAICompatibleProvider,
 )
+from vait.inference.providers.stdlib_http import (
+    ProviderPostRedirectDenied,
+    ProviderRedirectDenied,
+)
+from vait.inference.providers.transport_policy_errors import (
+    ProviderTransportPolicyDenied,
+)
+from vait.platform.security.egress import ProviderEgressDenied
 
 
 class FakeTransport:
@@ -292,6 +301,38 @@ def test_openai_compatible_provider_rejects_malformed_success() -> None:
     assert response.error is not None
     assert response.error.error_type == "invalid_response"
     assert response.error.retryable is False
+
+
+@pytest.mark.parametrize(
+    "denial",
+    [
+        ProviderEgressDenied("origin_not_allowed"),
+        ProviderRedirectDenied(),
+        ProviderPostRedirectDenied(),
+    ],
+)
+def test_security_policy_denial_is_not_retryable(
+    denial: ProviderTransportPolicyDenied,
+) -> None:
+    """Security denials must never advertise a safe provider retry."""
+    transport = FakeTransport(error=denial)
+
+    provider = OpenAICompatibleProvider(
+        base_url="https://example.test",
+        model_id="portable-model",
+        transport=transport,
+    )
+
+    response = provider.generate(build_request())
+
+    assert response.succeeded is False
+    assert response.error is not None
+    assert response.error.error_type == "transport_policy_denied"
+    assert response.error.retryable is False
+    assert response.error.message == (
+        "Provider transport policy denied the request."
+    )
+    assert len(transport.calls) == 1
 
 
 def test_openai_compatible_provider_normalises_transport_failure() -> None:

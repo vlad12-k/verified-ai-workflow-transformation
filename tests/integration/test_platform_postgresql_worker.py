@@ -19,6 +19,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 from sqlalchemy import text
 
 from vait.inference.providers.models import (
+    ProviderError,
     ProviderInferenceResponse,
     ProviderTiming,
 )
@@ -42,7 +43,10 @@ from vait.platform.persistence.repositories.registry import (
     ExperimentRunRepository,
 )
 from vait.platform.persistence.session import transactional_session
-from vait.platform.provider_execution import BudgetedJobProviderInvocation
+from vait.platform.provider_execution import (
+    BudgetedJobProviderInvocation,
+    ProviderInvocationFailed,
+)
 from vait.platform.registry import ExperimentRunRecord
 from vait.platform.settings import PlatformSettings
 
@@ -937,6 +941,77 @@ def test_provider_transport_error_is_terminal_without_evidence(
 
     invocation.invoke.assert_called_once()
 
+
+
+@pytest.mark.parametrize(
+    ("retryable", "error_type"),
+    [
+        (True, "transport_error"),
+        (False, "transport_policy_denied"),
+    ],
+)
+def test_provider_retryability_hint_does_not_replay_single_attempt_job(
+    worker_runtime: DatabaseRuntime,
+    retryable: bool,
+    error_type: str,
+) -> None:
+    """A provider retry hint cannot override the durable one-attempt rule."""
+    job = _create_provider_worker_job(worker_runtime)
+
+    response = ProviderInferenceResponse(
+        request_id="worker-retry-contract",
+        provider_id="fake-provider",
+        runtime_id="fake-runtime",
+        model_id="fake-model",
+        timing=ProviderTiming(total_latency_ms=1.0),
+        error=ProviderError(
+            error_type=error_type,
+            message="Provider request did not complete successfully.",
+            retryable=retryable,
+        ),
+    )
+
+    invocation = Mock(spec=BudgetedJobProviderInvocation)
+    invocation.invoke.side_effect = ProviderInvocationFailed(response)
+
+    worker = WorkerService(
+        runtime=worker_runtime,
+        executor=BudgetedProviderJobExecutor(
+            invocation=cast(BudgetedJobProviderInvocation, invocation),
+            evidence_writer=PostgreSQLProviderEvidenceWriter(
+                runtime=worker_runtime,
+                worker_id="retry-contract-worker",
+            ),
+        ),
+        worker_id="retry-contract-worker",
+        lease_seconds=60,
+        allowed_operations=("provider-inference",),
+    )
+
+    first_cycle = worker.run_once(now=datetime.now(UTC))
+
+    assert first_cycle.claimed is True
+    assert first_cycle.job is not None
+    assert first_cycle.job.status == "FAILED"
+    assert first_cycle.job.attempt == 1
+    assert first_cycle.job.error_code == "ProviderInvocationFailed"
+
+    with transactional_session(worker_runtime) as session:
+        persisted = JobRepository(session).get(job.job_id)
+        evidence = EvidenceRepository(session).list_for_experiment(
+            job.experiment_id
+        )
+
+    assert persisted is not None
+    assert persisted.status == "FAILED"
+    assert persisted.attempt == 1
+    assert evidence == ()
+
+    second_cycle = worker.run_once(now=datetime.now(UTC))
+
+    assert second_cycle.claimed is False
+    assert second_cycle.job is None
+    invocation.invoke.assert_called_once()
 
 
 def test_worker_recovers_expired_retry_after_restart(

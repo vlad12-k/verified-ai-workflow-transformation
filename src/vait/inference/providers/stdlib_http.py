@@ -30,6 +30,9 @@ from pydantic import JsonValue, TypeAdapter
 from vait.inference.providers.openai_compatible import (
     OpenAICompatibleHttpResponse,
 )
+from vait.inference.providers.transport_policy_errors import (
+    ProviderTransportPolicyDenied,
+)
 
 if TYPE_CHECKING:
     from _typeshed import WriteableBuffer
@@ -161,7 +164,7 @@ class OutboundUrlValidator(Protocol):
         ...
 
 
-class ProviderRedirectDenied(ValueError):
+class ProviderRedirectDenied(ProviderTransportPolicyDenied):
     """Raised when a provider redirect crosses the original origin."""
 
     def __init__(
@@ -172,7 +175,7 @@ class ProviderRedirectDenied(ValueError):
         )
 
 
-class ProviderPostRedirectDenied(ValueError):
+class ProviderPostRedirectDenied(ProviderTransportPolicyDenied):
     """Reject automatic redirects of inference POST requests."""
 
     def __init__(self) -> None:

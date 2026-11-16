@@ -6,6 +6,10 @@ from socket import SOCK_STREAM, getaddrinfo
 from typing import Literal, Protocol, cast
 from urllib.parse import SplitResult, urlsplit
 
+from vait.inference.providers.transport_policy_errors import (
+    ProviderTransportPolicyDenied,
+)
+
 EgressDenialReason = Literal[
     "invalid_url",
     "unsupported_scheme",
@@ -21,7 +25,7 @@ _DEFAULT_PORTS = {
 }
 
 
-class ProviderEgressDenied(ValueError):
+class ProviderEgressDenied(ProviderTransportPolicyDenied):
     """Raised when an outbound provider endpoint violates egress policy."""
 
     def __init__(
