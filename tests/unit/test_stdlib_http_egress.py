@@ -20,6 +20,7 @@ from pydantic import JsonValue
 
 from vait.inference.providers import stdlib_http
 from vait.inference.providers.stdlib_http import (
+    ProviderPostRedirectDenied,
     ProviderRedirectDenied,
     StdlibJsonTransport,
 )
@@ -98,6 +99,7 @@ def _build_redirect_handler(
     *,
     record: RedirectRecord,
     location: str,
+    status_code: int = 302,
 ) -> type[BaseHTTPRequestHandler]:
     """Build a server that redirects POST and serves redirected GET."""
 
@@ -110,7 +112,7 @@ def _build_redirect_handler(
             record.post_path = self.path
 
             self.send_response(
-                302
+                status_code
             )
             self.send_header(
                 "Location",
@@ -175,6 +177,7 @@ def _start_redirect_server(
     *,
     record: RedirectRecord,
     location: str,
+    status_code: int = 302,
 ) -> tuple[
     ThreadingHTTPServer,
     Thread,
@@ -188,6 +191,7 @@ def _start_redirect_server(
         _build_redirect_handler(
             record=record,
             location=location,
+            status_code=status_code,
         ),
     )
 
@@ -364,6 +368,66 @@ def _trust_test_certificate(
     monkeypatch.setattr(ssl, "create_default_context", create_trusting_context)
 
 
+def test_post_received_before_response_timeout_is_not_replayed() -> None:
+    """A received POST with no response must not be sent a second time."""
+    received = Event()
+    release = Event()
+    paths: list[str] = []
+
+    class DelayedHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            self.rfile.read(
+                int(self.headers.get("Content-Length", "0"))
+            )
+            paths.append(self.path)
+            received.set()
+            release.wait(timeout=8.0)
+
+        def log_message(
+            self,
+            format: str,
+            *args: object,
+        ) -> None:
+            del format, args
+
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        DelayedHandler,
+    )
+    thread = Thread(
+        target=server.serve_forever,
+        daemon=True,
+    )
+    thread.start()
+
+    try:
+        origin = _server_origin(server)
+
+        transport = StdlibJsonTransport(
+            url_validator=ProviderEgressPolicy(
+                allowed_origins=frozenset({origin}),
+                allow_non_global_addresses=True,
+            ),
+        )
+
+        with pytest.raises((TimeoutError, URLError)):
+            transport.post_json(
+                url=f"{origin}/v1/chat/completions",
+                headers={},
+                payload=_payload(),
+                timeout_seconds=1.5,
+            )
+
+        assert received.is_set()
+        assert paths == ["/v1/chat/completions"]
+
+    finally:
+        release.set()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5.0)
+
+
 def test_transport_validates_initial_url_before_network_access() -> None:
     """A rejected initial destination must never reach urllib networking."""
     validator = RejectingValidator()
@@ -397,88 +461,126 @@ def test_transport_validates_initial_url_before_network_access() -> None:
     assert stdlib_http._PINNED_ADDRESSES.get() is None
 
 
-def test_same_origin_redirect_is_validated_before_following() -> None:
-    """A same-origin redirect may proceed only after policy validation."""
+
+@pytest.mark.parametrize("status_code", [307, 308])
+def test_307_308_do_not_replay_inference_post(
+    status_code: int,
+) -> None:
+    """Redirecting an inference POST must not send a second POST."""
+    request_paths: list[str] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            request_paths.append(self.path)
+            self.send_response(status_code)
+            self.send_header("Location", "/replayed")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(
+            self,
+            format: str,
+            *args: object,
+        ) -> None:
+            del format, args
+
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        Handler,
+    )
+    thread = Thread(
+        target=server.serve_forever,
+        daemon=True,
+    )
+    thread.start()
+
+    try:
+        origin = _server_origin(server)
+
+        policy = ProviderEgressPolicy(
+            allowed_origins=frozenset({origin}),
+            allow_non_global_addresses=True,
+        )
+
+        transport = StdlibJsonTransport(
+            url_validator=policy,
+        )
+
+        with pytest.raises(
+            ProviderPostRedirectDenied,
+            match="provider POST redirect denied",
+        ):
+            transport.post_json(
+                url=f"{origin}/v1/chat/completions",
+                headers={},
+                payload=_payload(),
+                timeout_seconds=5.0,
+            )
+
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5.0)
+
+    assert request_paths == ["/v1/chat/completions"]
+
+
+@pytest.mark.parametrize("status_code", [301, 302, 303])
+def test_same_origin_post_redirect_is_denied_before_following(
+    status_code: int,
+) -> None:
+    """A validated same-origin redirect must not create another request."""
     record = RedirectRecord()
 
     server, thread = _start_redirect_server(
         record=record,
         location="/redirected",
+        status_code=status_code,
     )
 
     try:
-        origin = _server_origin(
-            server
-        )
+        origin = _server_origin(server)
 
         policy = ProviderEgressPolicy(
-            allowed_origins=frozenset(
-                {
-                    origin,
-                }
-            ),
+            allowed_origins=frozenset({origin}),
             allow_non_global_addresses=True,
         )
 
-        validator = RecordingValidator(
-            delegate=policy,
-        )
-
+        validator = RecordingValidator(delegate=policy)
         transport = StdlibJsonTransport(
             url_validator=validator,
         )
 
-        initial_url = (
-            f"{origin}/v1/chat/completions"
-        )
-        redirected_url = (
-            f"{origin}/redirected"
-        )
+        initial_url = f"{origin}/v1/chat/completions"
+        redirected_url = f"{origin}/redirected"
 
-        response = transport.post_json(
-            url=initial_url,
-            headers={
-                "Authorization": (
-                    "Bearer local-redirect-test"
-                ),
-            },
-            payload=_payload(),
-            timeout_seconds=5.0,
-        )
+        with pytest.raises(
+            ProviderPostRedirectDenied,
+            match="provider POST redirect denied",
+        ):
+            transport.post_json(
+                url=initial_url,
+                headers={
+                    "Authorization": "Bearer local-redirect-test",
+                },
+                payload=_payload(),
+                timeout_seconds=5.0,
+            )
 
     finally:
         server.shutdown()
         server.server_close()
-        thread.join(
-            timeout=5.0
-        )
+        thread.join(timeout=5.0)
 
-    assert response.status_code == 200
-    assert response.body == {
-        "redirected": True,
-    }
-
-    # The initial URL is preflight-validated and resolved again for its pinned
-    # connection; redirect validation and pinning are separate gates too.
     assert validator.calls == [
         initial_url,
         initial_url,
         redirected_url,
-        redirected_url,
     ]
 
-    assert (
-        record.post_path
-        == "/v1/chat/completions"
-    )
-    assert (
-        record.get_path
-        == "/redirected"
-    )
-    assert (
-        record.redirected_authorization
-        == "Bearer local-redirect-test"
-    )
+    assert record.post_path == "/v1/chat/completions"
+    assert record.get_path is None
+    assert record.redirected_authorization is None
 
 
 def test_cross_origin_redirect_is_denied_even_when_target_is_allowlisted(

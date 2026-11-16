@@ -172,10 +172,17 @@ class ProviderRedirectDenied(ValueError):
         )
 
 
+class ProviderPostRedirectDenied(ValueError):
+    """Reject automatic redirects of inference POST requests."""
+
+    def __init__(self) -> None:
+        super().__init__("provider POST redirect denied")
+
+
 class _ValidatedRedirectHandler(
     HTTPRedirectHandler
 ):
-    """Validate redirect targets before urllib follows them."""
+    """Validate targets and deny automatic POST redirects."""
 
     def __init__(
         self,
@@ -209,6 +216,9 @@ class _ValidatedRedirectHandler(
                 )
             ):
                 raise ProviderRedirectDenied()
+
+            if req.get_method() == "POST":
+                raise ProviderPostRedirectDenied()
         except Exception:
             fp.close()
             raise

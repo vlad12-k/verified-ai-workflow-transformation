@@ -227,6 +227,51 @@ def test_no_provider_call_without_committed_dispatch(
     assert "settle" not in events
 
 
+def test_post_dispatch_timeout_preserves_unknown_consumption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ambiguous timeout must settle once without replay or zero usage."""
+    dispatcher, provider, ledger, events = make_harness(monkeypatch)
+
+    def timeout_after_dispatch(
+        request: ProviderInferenceRequest,
+    ) -> ProviderInferenceResponse:
+        assert request.request_id == "test-request"
+        events.append("generate")
+        raise TimeoutError("response lost after dispatch")
+
+    monkeypatch.setattr(provider, "generate", timeout_after_dispatch)
+
+    request, policies, estimate = input_data()
+
+    with pytest.raises(
+        TimeoutError,
+        match="response lost after dispatch",
+    ):
+        dispatcher.execute(
+            request=request,
+            policies=policies,
+            estimate=estimate,
+            execution_id=uuid4(),
+        )
+
+    assert events == [
+        "reserve", "commit",
+        "dispatch", "commit",
+        "generate",
+        "settle", "commit",
+    ]
+
+    assert len(ledger.settlements) == 1
+    consumption = ledger.settlements[0].consumption
+
+    assert consumption.provider_requests == 1
+    assert consumption.provider_attempts == 1
+    assert consumption.retries == 0
+    assert consumption.provider_tokens is None
+    assert consumption.spend_usd is None
+
+
 def test_provider_exception_records_unknown_consumption(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
