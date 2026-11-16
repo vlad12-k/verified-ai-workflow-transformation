@@ -25,9 +25,13 @@ from vait.platform.persistence.session import transactional_session
 from vait.platform.provider_dispatch_policy import (
     ProviderDispatchPolicy,
     ProviderDispatchPolicyError,
+    ProviderLocation,
 )
 from vait.platform.provider_identity import (
     classify_builtin_provider as classify_builtin_provider,
+)
+from vait.platform.provider_transport_integrity import (
+    require_known_remote_transport,
 )
 
 
@@ -179,6 +183,9 @@ class BudgetedJobProviderInvocation:
             raise ProviderDispatchPolicyError(
                 "Provider location does not match adapter identity."
             )
+
+        if actual_location is ProviderLocation.REMOTE:
+            require_known_remote_transport(provider)
 
         self._dispatch_policy = dispatch_policy
         self._provider = provider

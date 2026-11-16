@@ -21,7 +21,12 @@ from vait.inference.providers.models import (
     ProviderTiming,
     ProviderTokenUsage,
 )
-from vait.inference.providers.openai_compatible import OpenAICompatibleProvider
+from vait.inference.providers.openai_compatible import (
+    OpenAICompatibleProvider,
+    OpenAICompatibleTransport,
+)
+from vait.inference.providers.stdlib_http import StdlibJsonTransport
+from vait.inference.providers.watsonx import WatsonxProvider
 from vait.platform.jobs.models import JobRecord
 from vait.platform.persistence.engine import DatabaseRuntime
 from vait.platform.provider_dispatch_policy import (
@@ -30,6 +35,7 @@ from vait.platform.provider_dispatch_policy import (
     ProviderDispatchPolicyError,
     ProviderLocation,
 )
+from vait.platform.security.egress import ProviderEgressPolicy
 
 _TEST_POLICY = ProviderDispatchPolicy(
     location=ProviderLocation.LOCAL,
@@ -579,6 +585,31 @@ def test_unknown_adapter_is_rejected_despite_spoofed_identity() -> None:
         )
 
 
+
+def _known_remote_provider() -> OpenAICompatibleProvider:
+    """Build a configured HTTPS adapter without making network calls."""
+    return OpenAICompatibleProvider(
+        base_url="https://api.provider.test",
+        model_id="test-model",
+        transport=StdlibJsonTransport(
+            url_validator=ProviderEgressPolicy(
+                allowed_origins=frozenset(
+                    {"https://api.provider.test"}
+                ),
+            ),
+        ),
+    )
+
+
+def _remote_policy() -> ProviderDispatchPolicy:
+    return ProviderDispatchPolicy(
+        location=ProviderLocation.REMOTE,
+        mode=DispatchSafetyMode.REMOTE_RISK_ACCEPTED,
+        residual_risk_accepted=True,
+        internal_retries_verified_disabled=True,
+    )
+
+
 def test_real_remote_adapter_accepts_explicit_remote_policy() -> None:
     """Verified remote type and explicit remote policy may be composed."""
     job = _claimed_job()
@@ -591,7 +622,7 @@ def test_real_remote_adapter_accepts_explicit_remote_policy() -> None:
     )
 
     invocation = provider_execution.BudgetedJobProviderInvocation(
-        provider=object.__new__(OpenAICompatibleProvider),
+        provider=_known_remote_provider(),
         runtime=_runtime_with_job(job),
         plan_resolver=RecordingResolver(_plan()),
         worker_id="worker-01",
@@ -602,3 +633,61 @@ def test_real_remote_adapter_accepts_explicit_remote_policy() -> None:
         invocation,
         provider_execution.BudgetedJobProviderInvocation,
     )
+
+
+
+def test_remote_invocation_rejects_unknown_http_transport() -> None:
+    """An unknown transport cannot be authorised by a policy flag."""
+    job = _claimed_job()
+    provider = _known_remote_provider()
+    provider._transport = cast(OpenAICompatibleTransport, object())
+
+    with pytest.raises(
+        ProviderDispatchPolicyError,
+        match="known HTTP transport",
+    ):
+        provider_execution.BudgetedJobProviderInvocation(
+            provider=provider,
+            runtime=_runtime_with_job(job),
+            plan_resolver=RecordingResolver(_plan()),
+            worker_id="worker-01",
+            dispatch_policy=_remote_policy(),
+        )
+
+
+def test_remote_invocation_rejects_unaudited_watsonx() -> None:
+    """Unknown Watsonx transport behavior must fail closed."""
+    job = _claimed_job()
+
+    with pytest.raises(
+        ProviderDispatchPolicyError,
+        match="has not been audited",
+    ):
+        provider_execution.BudgetedJobProviderInvocation(
+            provider=object.__new__(WatsonxProvider),
+            runtime=_runtime_with_job(job),
+            plan_resolver=RecordingResolver(_plan()),
+            worker_id="worker-01",
+            dispatch_policy=_remote_policy(),
+        )
+
+
+def test_remote_cache_cannot_hide_unknown_http_transport() -> None:
+    """A cache wrapper cannot bypass transport validation."""
+    job = _claimed_job()
+    provider = _known_remote_provider()
+    provider._transport = cast(OpenAICompatibleTransport, object())
+
+    cached = DeterministicCachingProvider(provider=provider)
+
+    with pytest.raises(
+        ProviderDispatchPolicyError,
+        match="known HTTP transport",
+    ):
+        provider_execution.BudgetedJobProviderInvocation(
+            provider=cached,
+            runtime=_runtime_with_job(job),
+            plan_resolver=RecordingResolver(_plan()),
+            worker_id="worker-01",
+            dispatch_policy=_remote_policy(),
+        )
