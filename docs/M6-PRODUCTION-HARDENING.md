@@ -350,6 +350,179 @@ Required before claiming strict prevention of late external requests:
 Do not enable an unrestricted live provider worker on the assumption
 that successful CI proves this security guarantee.
 
+### M6-D2F3C6A — Provider delivery guarantees and risk decision
+
+**Status: OPEN / NO-GO for strict no-late-external-I/O claims.**
+
+This acceptance contract applies to platform-controlled inference through
+`BudgetedJobProviderInvocation`. It does not establish guarantees for
+research benchmarks, direct provider calls, or third-party services.
+
+#### Verified guarantees
+
+- A durable budget dispatch is claimed once per execution identity.
+- Unsupported retry attempts are rejected at the platform boundary.
+- Known invalid job claims are rejected before provider dispatch.
+- Built-in adapter identity is checked against dispatch policy.
+- Remote providers require the audited built-in HTTPS transport configuration.
+- Automatic inference POST redirects are denied by `StdlibJsonTransport`.
+- Controlled timeout tests show no automatic POST replay.
+- Unknown post-dispatch consumption is not recorded as known zero.
+
+These are bounded, tested properties. They do not constitute a
+remote exactly-once execution guarantee.
+
+#### Dispatch mode contract
+
+| Mode | Current disposition |
+| --- | --- |
+| `LOCAL_ONLY` | Allows a recognised offline local adapter; rejects remote adapter identity |
+| `REMOTE_RISK_ACCEPTED` | Requires recognised remote adapter, approved transport configuration and explicit residual-risk acknowledgement |
+| `STRICT_NO_LATE_IO` | Rejected until receiver-side fencing is independently verified |
+
+The flags `residual_risk_accepted` and
+`internal_retries_verified_disabled` express trusted configuration intent.
+They are not, on their own, independent proof of an external provider's
+retry behaviour, idempotency or fencing capabilities.
+
+The current trusted remote transport gate rejects the unaudited Watsonx
+transport. No exception is authorised by this document.
+
+#### Confirmed open risks
+
+1. A worker can lose its lease after the last database validation and
+   still invoke the provider. The PostgreSQL TOCTOU test reproduces this.
+2. PostgreSQL transactions cannot atomically fence an unrelated HTTP
+   receiver from accepting an already-issued or late request.
+3. A request identifier does not prove remote idempotency.
+4. A timeout after POST delivery leaves remote execution and consumption
+   uncertain even when the local client does not retry.
+5. Provider-side behaviour and end-to-end production composition require
+   independent evidence before operational approval.
+
+#### Required receiver-side evidence for strict guarantees
+
+- Define a durable, monotonic fencing token and its ownership lifecycle.
+- Demonstrate that the receiving service rejects stale fencing tokens.
+- Verify enforcement atomically with the receiver's side effect.
+- Test lease expiration between validation and network transmission.
+- Test response loss, worker crash, recovery and duplicate delivery.
+- Verify the external provider's documented idempotency semantics.
+- Confirm that retry behaviour is bounded and represented in budget evidence.
+
+Idempotency by itself may suppress duplicate processing but does not prove
+that a stale lease holder cannot execute a first, late request.
+
+#### Security decision
+
+**NO-GO** for claiming strict no-late-I/O or exactly-once remote effects.
+
+A separately scoped remote-risk-accepted mode is not equivalent to strict
+fencing. Its operational use requires a documented risk owner, verified
+transport semantics, provider-specific evidence and an explicit deployment
+decision.
+
+Do not merge the M6 PR or enable unrestricted remote worker execution
+based solely on green CI.
+
+#### Evidence
+
+- `tests/integration/test_platform_postgresql_job_lifecycle.py`
+  - `test_pause_after_final_claim_check_exposes_late_provider_io`
+- `tests/integration/test_platform_postgresql_worker.py`
+  - `test_provider_transport_error_is_terminal_without_evidence`
+- `tests/unit/test_stdlib_http_egress.py`
+  - `test_post_received_before_response_timeout_is_not_replayed`
+  - `test_307_308_do_not_replay_inference_post`
+- `tests/unit/test_budget_guard.py`
+  - `test_post_dispatch_timeout_preserves_unknown_consumption`
+- `tests/unit/test_provider_dispatch_policy.py`
+- `tests/unit/test_provider_transport_integrity.py`
+
+Checkpoint: `58fca70ddd775f347152a72c5bcf643f37b03083`.
+GitHub CI: run `43928087983`, successful.
+
+**Next: M6-D2F3C6B — receiver-capability assessment and technical
+fencing feasibility decision.**
+
+
+### M6-D2F3C6B — Receiver fencing feasibility
+
+**Decision: STRICT NO-GO. Receiver-side fencing is not verified.**
+
+Assessment basis: repository checkpoint `58fca70`, 16 November 2026.
+This is a source-code feasibility assessment, not a live provider test.
+
+#### Receiver capability matrix
+
+| Adapter | Verified platform boundary | Receiver evidence | Strict mode |
+| --- | --- | --- | --- |
+| OpenAI-compatible | Recognised adapter, approved HTTPS transport, egress control and denied POST redirects | No specific external receiver has demonstrated atomic fencing or idempotency | NO-GO |
+| Watsonx | Adapter exists, but trusted remote transport gate rejects it | Transport retry behaviour and receiver fencing not verified | NO-GO |
+| Offline Hugging Face | Local-only configuration requires offline model loading | External HTTP receiver fencing is not applicable to this adapter | LOCAL_ONLY |
+
+An OpenAI-compatible API contract does not establish identical
+idempotency or fencing semantics across implementations.
+
+A configured request identifier is not proof of receiver-side
+idempotency. Neither a database transaction nor a client-side
+lease check can force an unrelated HTTP receiver to reject
+a request from an expired lease holder.
+
+#### Technical options
+
+**Option A — Receiver-controlled fencing**
+
+Applicable only when the receiving service is under sufficient
+control to enforce a monotonic fencing token atomically with
+its protected side effect.
+
+Required evidence:
+
+- Receiver rejects stale or superseded tokens.
+- Token ownership and advancement are durable.
+- Duplicate request handling is explicitly defined.
+- Paused-worker and expired-lease tests prove rejection.
+- Crash, timeout and recovery tests preserve the contract.
+- Any downstream service effects are included in the guarantee.
+
+A locally controlled gateway does not automatically provide
+fencing for a third-party service behind that gateway.
+
+**Option B — External receiver without verified fencing**
+
+Strict no-late-I/O is not supportable on the available evidence.
+
+The existing REMOTE_RISK_ACCEPTED mode represents a narrower
+execution contract. It must not be labelled exactly-once,
+at-most-once remote effect, or strict no-late-I/O.
+
+Any operational use requires a scoped approval, identified
+risk owner, provider-specific retry and idempotency evidence,
+bounded exposure, and an explicit deployment decision.
+
+#### Acceptance decision
+
+- Keep STRICT_NO_LATE_IO fail-closed.
+- Do not broaden the trusted transport allowlist.
+- Do not claim remote idempotency based on request IDs alone.
+- Do not treat green CI as receiver-side fencing evidence.
+- Preserve the documented PostgreSQL TOCTOU reproduction.
+- Do not enable unrestricted live external provider dispatch.
+- Do not merge Draft PR #9 based on this assessment.
+
+#### Next implementation gate — C6C
+
+Before changing dispatch semantics, identify a concrete
+receiver endpoint and API version, verify its documented
+idempotency/fencing capabilities, and choose the supported
+delivery guarantee.
+
+If the receiver cannot enforce fencing, retain strict
+NO-GO and design only a separately approved,
+risk-bounded remote execution mode.
+
+
 ---
 
 ## M6-E — Persistence recovery and migration safety
