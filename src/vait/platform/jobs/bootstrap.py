@@ -9,8 +9,7 @@ from threading import Event
 from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from vait.platform.jobs.process import run_worker_process
-from vait.platform.jobs.worker import JobExecutor, WorkerService
+from vait.platform.jobs.composition import TrustedLocalExecutorRegistry
 from vait.platform.persistence.engine import (
     DatabaseConfigurationError,
     create_database_runtime,
@@ -59,50 +58,22 @@ def check_worker_configuration() -> None:
 
 def run_configured_worker(
     *,
-    executor: JobExecutor,
-    allowed_operations: tuple[str, ...],
+    composition: TrustedLocalExecutorRegistry,
     platform_settings: PlatformSettings | None = None,
     worker_settings: WorkerRuntimeSettings | None = None,
     stop_event: Event | None = None,
 ) -> None:
-    """Run only explicitly allowlisted durable job operations."""
+    """Fail closed until trusted execution and evidence contracts are ready."""
 
-    if not allowed_operations or any(
-        not operation
-        or operation.strip() != operation
-        or len(operation) > 128
-        for operation in allowed_operations
-    ):
-        raise ValueError("Invalid allowed_operations")
-
-    platform = (
-        platform_settings
-        if platform_settings is not None
-        else PlatformSettings()
-    )
-    worker = (
-        worker_settings
-        if worker_settings is not None
-        else load_worker_settings()
-    )
-
-    runtime = create_database_runtime(platform)
-
-    try:
-        service = WorkerService(
-            runtime=runtime,
-            executor=executor,
-            worker_id=worker.worker_id,
-            lease_seconds=worker.lease_seconds,
-            allowed_operations=allowed_operations,
+    if not isinstance(composition, TrustedLocalExecutorRegistry):
+        raise TypeError(
+            "composition must be a TrustedLocalExecutorRegistry"
         )
-        run_worker_process(
-            service=service,
-            poll_interval_seconds=worker.poll_interval_seconds,
-            stop_event=stop_event,
-        )
-    finally:
-        runtime.dispose()
+
+    raise RuntimeError(
+        "Executable verification worker startup is disabled until a trusted "
+        "implementation registry and durable evidence writer are available"
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -119,8 +90,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.run:
         print(
-            "ERROR: No trusted concrete JobExecutor is registered. "
-            "Refusing to claim jobs.",
+            "ERROR: No complete trusted local executor and evidence "
+            "persistence are registered. Refusing to claim jobs.",
             file=sys.stderr,
         )
         return 2

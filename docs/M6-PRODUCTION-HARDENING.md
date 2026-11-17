@@ -305,6 +305,71 @@ PostgreSQL remains the durable source of truth.
 Redis remains unnecessary unless a new measured requirement overturns the
 existing ADR decision.
 
+### M6-D3B1 — Trusted local worker composition
+
+**Checkpoint: composition boundary implemented; executable worker remains
+NO-GO.**
+
+`TrustedLocalExecutorRegistry` is a frozen, slotted, routing-only allowlist.
+It defensively copies an explicit operation mapping, exposes only immutable
+operation values, and accepts no executor instances or callable references.
+Its code-owned registration contains only `verification`; provider-inference is
+excluded. Routing reads `JobRecord.operation` only and never interprets payload
+fields as implementation names, imports, or policy.
+
+Executable local worker startup remains disabled at both entry points. The CLI
+`--run` returns refusal before runtime creation. Programmatic
+`run_configured_worker()` validates the routing registry and then raises before
+loading worker settings, creating a database runtime, or starting a process.
+Compose continues to expose configuration preflight, not an executable worker
+service.
+
+This does not change the pre-existing M5 `WorkerService.run_once()` contract.
+Direct callers can still supply a generic `JobExecutor`; for non-provider
+operations, a normal return is followed by `mark_succeeded()` without a generic
+verification-evidence check (`src/vait/platform/jobs/worker.py`). That direct
+path remains unsupported for verification work and is not made safe by the
+D3B1 bootstrap refusal. Do not wire it into production verification startup;
+D2F3/D3B2 must supply a trusted implementation identity and durable atomic
+verification-evidence completion contract before any such path is enabled.
+
+The deterministic verification primitive accepts typed
+`TransformationContract`, `VerificationCase`, and `ImplementationRunner`
+inputs, but the platform does not yet persist or resolve a trusted executable
+work specification. `JobRecord.payload` is generic JSON; experiment persistence
+stores contract identifiers/version and dataset fingerprint/partition, but no
+typed contract contents, finite case snapshot, or trusted implementation
+reference is available through a platform repository. `PythonImplementationRunner`
+requires a supplied callable, and the platform has no code-owned implementation
+registry bound to an experiment revision. The generic evidence envelope does
+not define a verification-result schema or an atomic evidence-and-completion
+writer for local verification under the active job claim.
+
+No job schema, dummy success executor, dynamic import, `eval`, or `exec` path
+was introduced. Before D3B2 enables an executable Docker worker, define and
+persist the trusted work reference, resolve only allowlisted implementation
+code, and add a verification evidence contract whose persistence and job
+completion preserve transactional ownership and lease checks.
+
+#### D3B1R conditional acceptance — routing-only scope
+
+The owner-approved conditional acceptance applies only to this non-executable,
+routing-only security checkpoint. It does not enable worker execution or
+override the existing D2F3 security dispositions.
+
+The verified full suite reported 1,026 passed, with no failures, errors, or
+skips. Combined coverage was 90.1335%, meeting the existing 85% GitHub CI
+threshold. Independent project-wide branch coverage was 80.9735%, compared
+with the clean pre-D3B1 baseline of 80.8807%. This is not a regression, but it
+remains below the separate 85% quality objective, which remains OPEN. Branch
+coverage on changed/new production code was 93.75%.
+
+The local Docker build remains BLOCKED because the selected `desktop-linux`
+daemon socket was unavailable; this is not a passing build. Final checkpoint
+acceptance remains conditional on both `Quality gates` and `Container E2E`
+succeeding for the new commit. Do not report final acceptance before both
+exact-head GitHub Actions jobs succeed.
+
 
 ### M6-D2F3C2 — Confirmed post-validation dispatch race
 
