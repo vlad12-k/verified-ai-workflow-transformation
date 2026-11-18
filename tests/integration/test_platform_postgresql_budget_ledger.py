@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import IntegrityError
@@ -39,7 +40,11 @@ from vait.platform.persistence.repositories.budgets import (
 _DATABASE_ENV = "VAIT_TEST_DATABASE_URL"
 _ROOT = Path(__file__).resolve().parents[2]
 _ALEMBIC_INI = _ROOT / "alembic.ini"
-_EXPECTED_REVISION = "0004_m6c2_budget_ledger"
+def _expected_migration_head() -> str:
+    """Resolve the current Alembic head for ledger integration tests."""
+    head = ScriptDirectory.from_config(Config(str(_ALEMBIC_INI))).get_current_head()
+    assert head is not None, "Expected exactly one Alembic migration head"
+    return head
 
 
 def _is_explicit_test_database(database_name: str) -> bool:
@@ -207,7 +212,7 @@ def test_migration_installs_the_budget_ledger_schema(
             text("SELECT to_regclass('budget_reservation_scopes') IS NOT NULL")
         )
 
-    assert revision == _EXPECTED_REVISION
+    assert revision == _expected_migration_head()
     assert reservations is True
     assert scopes is True
 
@@ -248,7 +253,7 @@ def test_budget_ledger_migration_downgrade_upgrade_round_trip(
                 )
             ).one()
 
-        assert revisions == [_EXPECTED_REVISION]
+        assert revisions == [_expected_migration_head()]
         assert ledger_schema == (True, True, True)
     finally:
         command.upgrade(config, "head")
