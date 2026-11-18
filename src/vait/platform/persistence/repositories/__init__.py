@@ -10,12 +10,30 @@ from vait.platform.persistence.repositories.registry import (
     EvidenceRepository,
     ExperimentRunRepository,
 )
+from vait.platform.persistence.repositories.trusted_bundles import (
+    ConflictingTrustedVerificationBundleError,
+    DuplicateTrustedVerificationBundleError,
+    PersistedTrustedVerificationBundleIntegrityError,
+    TrustedVerificationBundleIntegrityError,
+    TrustedVerificationBundleLineageError,
+    TrustedVerificationBundleRepository,
+    TrustedVerificationBundleRepositoryError,
+    UnknownExperimentError,
+)
 
 __all__ = [
     "ArtifactMetadataRepository",
     "CandidateRepository",
+    "ConflictingTrustedVerificationBundleError",
+    "DuplicateTrustedVerificationBundleError",
     "EvidenceRepository",
     "ExperimentRunRepository",
+    "PersistedTrustedVerificationBundleIntegrityError",
     "PostgreSQLBudgetReservationLedger",
     "Repository",
+    "TrustedVerificationBundleIntegrityError",
+    "TrustedVerificationBundleLineageError",
+    "TrustedVerificationBundleRepository",
+    "TrustedVerificationBundleRepositoryError",
+    "UnknownExperimentError",
 ]

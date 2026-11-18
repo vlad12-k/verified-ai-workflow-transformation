@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -86,6 +87,71 @@ class ExperimentRunRow(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
+        nullable=False,
+    )
+
+
+class TrustedVerificationBundleRow(Base):
+    """Persist one immutable canonical verification bundle per experiment."""
+
+    __tablename__ = "trusted_verification_bundles"
+    __table_args__ = (
+        CheckConstraint(
+            "length(bundle_version) > 0",
+            name="ck_trusted_verification_bundles_bundle_version_nonempty",
+        ),
+        CheckConstraint(
+            "length(contract_id) > 0",
+            name="ck_trusted_verification_bundles_contract_id_nonempty",
+        ),
+        CheckConstraint(
+            "length(contract_version) > 0",
+            name="ck_trusted_verification_bundles_contract_version_nonempty",
+        ),
+        CheckConstraint(
+            "length(source_revision) = 40",
+            name="ck_trusted_verification_bundles_source_revision_length",
+        ),
+        CheckConstraint(
+            "length(fingerprint_sha256) = 64",
+            name="ck_trusted_verification_bundles_fingerprint_length",
+        ),
+        CheckConstraint(
+            "length(canonical_json) > 0",
+            name="ck_trusted_verification_bundles_canonical_json_nonempty",
+        ),
+    )
+
+    experiment_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey(
+            "experiment_runs.experiment_id",
+            name="fk_trusted_verification_bundles_experiment_id_experiment_runs",
+        ),
+        primary_key=True,
+    )
+    bundle_version: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+    )
+    contract_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    contract_version: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+    )
+    source_revision: Mapped[str] = mapped_column(
+        String(40),
+        nullable=False,
+    )
+    fingerprint_sha256: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    canonical_json: Mapped[str] = mapped_column(
+        Text,
         nullable=False,
     )
 

@@ -215,6 +215,7 @@ def test_offline_environment_uses_validated_database_url(
     assert len(
         recorder.configure_calls
     ) == 1
+    assert "trusted_verification_bundles" in module.target_metadata.tables
 
     configured = (
         recorder.configure_calls[0]

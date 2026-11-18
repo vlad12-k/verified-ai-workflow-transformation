@@ -244,3 +244,29 @@ def test_jobs_migration_declares_expected_operations() -> None:
         ),
         ("drop_table", "jobs"),
     ]
+
+
+def test_trusted_bundle_migration_only_adds_its_own_table() -> None:
+    """Bundle migration must not alter or remove pre-existing tables."""
+    migration = _load_migration(
+        "0005_m6d3b_trusted_bundle.py"
+    )
+
+    assert migration.revision == "0005_m6d3b_trusted_bundle"
+    assert migration.down_revision == "0004_m6c2_budget_ledger"
+
+    operations = RecordingOperations()
+    migration.op = operations
+
+    migration.upgrade()
+
+    assert operations.events == [
+        ("create_table", "trusted_verification_bundles"),
+    ]
+
+    operations.events.clear()
+    migration.downgrade()
+
+    assert operations.events == [
+        ("drop_table", "trusted_verification_bundles"),
+    ]

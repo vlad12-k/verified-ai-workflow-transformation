@@ -203,6 +203,17 @@ Database readiness errors are not exposed through the public health response.
 
 The registry accepts structured JSON evidence payloads.
 
+Trusted verification bundles are persisted as canonical JSON text with separate
+experiment, contract, source-revision, bundle-version, and SHA-256 fields.
+Registration is accepted only through the trusted application path and checks
+those values against the persisted `ExperimentRunRecord`; reads strictly
+reconstruct the bundle and revalidate its content fingerprint and lineage.
+The unkeyed SHA-256 digest detects content changes but does not authenticate
+the creator or prove that the bundle originated from the named experiment.
+Serialised bundle content and caller-supplied identities therefore remain
+untrusted until validated, and a matching digest is not authorisation or proof
+of provenance. This persistence path does not enable worker execution.
+
 **Primary concerns:**
 
 - sensitive data accidentally entering evidence payloads;
