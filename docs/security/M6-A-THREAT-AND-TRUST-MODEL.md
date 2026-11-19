@@ -214,6 +214,35 @@ Serialised bundle content and caller-supplied identities therefore remain
 untrusted until validated, and a matching digest is not authorisation or proof
 of provenance. This persistence path does not enable worker execution.
 
+The code-owned `TrustedImplementationRegistry` binds an exact implementation
+ID and version to a factory defined in application code. Registrations are
+snapshotted and immutable; the resolver does not accept registration or
+import-path instructions from persisted job data. The future
+verification-resolution boundary uses only the
+job's experiment ID as a lookup reference and rejects non-empty job payloads,
+because no typed payload contract currently exists. It reloads the persisted
+experiment and trusted bundle, validates their experiment, contract, version,
+and source-revision lineage, and checks the candidate identity/version against
+the code-owned allowlist before constructing runners. `TransformationContract`
+currently stores implementation IDs but not versions: the reference ID is
+resolvable only when one version is registered, and the candidate version is
+selected from a persisted `CandidateRecord` and must match an approved registry
+entry.
+
+The experiment/bundle source-revision comparison establishes lineage
+consistency, not authentication of the application code or proof that a
+particular callable came from that revision. A code-owned registration may
+optionally pin an exact source revision; the current built-in synthetic AP
+policy registration is not pinned. The registry currently contains only that
+existing deterministic implementation, so unsupported or incomplete reference
+and candidate pairs fail closed. Candidate rows and bundle fingerprints are
+not treated as proof of code origin. This resolution boundary is not wired into
+worker composition. Its repository protocols are adapter seams, not proof of
+durability or authenticity; future application wiring must supply trusted
+session-bound repositories and a consistent read boundary. It does not
+establish job ownership or lease validity, execute runners, or persist
+verification evidence. Worker execution remains disabled.
+
 **Primary concerns:**
 
 - sensitive data accidentally entering evidence payloads;
