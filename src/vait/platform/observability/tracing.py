@@ -10,7 +10,12 @@ from opentelemetry.sdk.trace.export import (
     SimpleSpanProcessor,
     SpanExporter,
 )
-from opentelemetry.trace import Span, Tracer
+from opentelemetry.trace import (
+    Span,
+    Status,
+    StatusCode,
+    Tracer,
+)
 
 from vait.platform.observability.context import (
     bind_log_context,
@@ -81,7 +86,9 @@ def traced_span(
         )
 
     with runtime.tracer.start_as_current_span(
-        name
+        name,
+        record_exception=False,
+        set_status_on_exception=False,
     ) as span:
         span_context = span.get_span_context()
 
@@ -92,6 +99,14 @@ def traced_span(
 
         try:
             yield span
+        except Exception:
+            span.set_status(
+                Status(
+                    StatusCode.ERROR,
+                    "operation failed",
+                )
+            )
+            raise
         finally:
             reset_log_context(
                 token

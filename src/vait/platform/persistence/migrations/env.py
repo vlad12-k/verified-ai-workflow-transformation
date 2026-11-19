@@ -1,18 +1,22 @@
 """Alembic migration environment for VAIT PostgreSQL persistence."""
 
-from importlib import import_module
-
 from alembic import context
 
 from vait.platform.persistence import (
     Base,
+    budget_models,
     create_database_runtime,
+    job_models,
+    registry_models,
 )
 from vait.platform.settings import PlatformSettings
 
-# Register persistence mappings before exposing metadata to Alembic.
-import_module("vait.platform.persistence.registry_models")
-import_module("vait.platform.persistence.job_models")
+# Explicitly import persistence mappings before exposing metadata to Alembic.
+_REGISTERED_MODEL_MODULES = (
+    registry_models,
+    job_models,
+    budget_models,
+)
 
 config = context.config
 target_metadata = Base.metadata

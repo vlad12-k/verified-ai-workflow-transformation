@@ -4,8 +4,9 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
+from uuid import NAMESPACE_URL, uuid5
 
-from vait.platform.jobs.models import JobRecord
+from vait.platform.jobs.models import JobRecord, utc_now
 from vait.platform.observability import (
     TracingRuntime,
     bind_log_context,
@@ -14,6 +15,7 @@ from vait.platform.observability import (
 )
 from vait.platform.persistence.engine import DatabaseRuntime
 from vait.platform.persistence.repositories.jobs import JobRepository
+from vait.platform.persistence.repositories.registry import EvidenceRepository
 from vait.platform.persistence.session import transactional_session
 
 _LOGGER = logging.getLogger("vait")
@@ -45,6 +47,7 @@ class WorkerService:
         executor: JobExecutor,
         worker_id: str,
         lease_seconds: int,
+        allowed_operations: tuple[str, ...] | None = None,
         tracing_runtime: TracingRuntime | None = None,
     ) -> None:
         if not worker_id:
@@ -61,6 +64,7 @@ class WorkerService:
         self._executor = executor
         self._worker_id = worker_id
         self._lease_seconds = lease_seconds
+        self._allowed_operations = allowed_operations
         self._tracing_runtime = tracing_runtime
 
     def run_once(
@@ -77,13 +81,31 @@ class WorkerService:
         with transactional_session(
             self._runtime
         ) as session:
-            claimed = JobRepository(
-                session
-            ).claim_next(
-                worker_id=self._worker_id,
-                now=now,
-                lease_seconds=self._lease_seconds,
+            repository = JobRepository(session)
+
+            # Recover abandoned leases and requeue eligible work.
+            # Both maintenance steps commit before execution.
+            repository.recover_expired_leases(
+                now=utc_now(),
+                allowed_operations=self._allowed_operations,
             )
+            repository.requeue_ready_retries(
+                allowed_operations=self._allowed_operations,
+            )
+
+            if self._allowed_operations is None:
+                claimed = repository.claim_next(
+                    worker_id=self._worker_id,
+                    now=now,
+                    lease_seconds=self._lease_seconds,
+                )
+            else:
+                claimed = repository.claim_next(
+                    worker_id=self._worker_id,
+                    now=now,
+                    lease_seconds=self._lease_seconds,
+                    allowed_operations=self._allowed_operations,
+                )
 
         if claimed is None:
             return WorkerCycleResult(
@@ -125,7 +147,8 @@ class WorkerService:
                     ).mark_failed_or_retry(
                         job_id=claimed.job_id,
                         worker_id=self._worker_id,
-                        now=now,
+                        expected_attempt=claimed.attempt,
+                        now=utc_now(),
                         error_code=error_code,
                     )
 
@@ -154,22 +177,50 @@ class WorkerService:
                     job=failed,
                 )
 
-            with transactional_session(
-                self._runtime
-            ) as session:
-                completed = JobRepository(
-                    session
-                ).mark_succeeded(
-                    job_id=claimed.job_id,
-                    worker_id=self._worker_id,
-                    now=now,
+            if claimed.operation == "provider-inference":
+                evidence_id = uuid5(
+                    NAMESPACE_URL,
+                    f"vait:provider-inference:{claimed.job_id}",
                 )
 
-            if completed is None:
-                raise RuntimeError(
-                    "Claimed job lost worker ownership "
-                    "before success persistence"
-                )
+                with transactional_session(self._runtime) as session:
+                    completed = JobRepository(session).get(
+                        claimed.job_id
+                    )
+                    evidence = EvidenceRepository(session).get(
+                        evidence_id
+                    )
+
+                if (
+                    completed is None
+                    or completed.status != "SUCCEEDED"
+                    or completed.job_id != claimed.job_id
+                    or completed.experiment_id != claimed.experiment_id
+                    or completed.attempt != claimed.attempt
+                    or completed.claimed_by != self._worker_id
+                    or evidence is None
+                    or evidence.experiment_id != claimed.experiment_id
+                    or evidence.kind != "inference"
+                    or evidence.payload.get("job_id") != str(claimed.job_id)
+                    or evidence.payload.get("attempt") != claimed.attempt
+                ):
+                    raise RuntimeError(
+                        "Provider job lacks durable atomic completion"
+                    )
+            else:
+                with transactional_session(self._runtime) as session:
+                    completed = JobRepository(session).mark_succeeded(
+                        job_id=claimed.job_id,
+                        worker_id=self._worker_id,
+                        expected_attempt=claimed.attempt,
+                        now=utc_now(),
+                    )
+
+                if completed is None:
+                    raise RuntimeError(
+                        "Claimed job lost worker ownership "
+                        "before success persistence"
+                    )
 
             _LOGGER.info(
                 "job_succeeded"

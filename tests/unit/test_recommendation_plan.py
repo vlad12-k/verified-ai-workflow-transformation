@@ -7,6 +7,8 @@ from vait.inference.models import (
     InferenceConfiguration,
 )
 from vait.optimisation.admissibility import (
+    AdmissibilityIssue,
+    AdmissibilityIssueCode,
     AdmissibilityStatus,
     SearchPointAdmissibility,
     SearchPointVerificationEvidence,
@@ -521,3 +523,654 @@ def test_recommendation_actions_and_execution_boundary() -> None:
         TransformationRecommendationPlan.model_validate(
             payload
         )
+
+
+def _ready_plan() -> TransformationRecommendationPlan:
+    """Build one valid READY recommendation used for mutation tests."""
+    analysis = _analysis(
+        frontier=(
+            "compact::cpu",
+        ),
+        preferred=(
+            "compact::cpu",
+        ),
+    )
+
+    return build_transformation_recommendation_plan(
+        analysis=analysis,
+        admissibility_by_search_point=(
+            _admissibility_map(
+                "compact",
+            )
+        ),
+    )
+
+
+def _empty_plan() -> TransformationRecommendationPlan:
+    """Build one valid NO_FEASIBLE_CANDIDATE recommendation."""
+    analysis = _analysis(
+        frontier=(),
+        preferred=(),
+        dominated=(
+            "dominated::cpu",
+        ),
+    )
+
+    return build_transformation_recommendation_plan(
+        analysis=analysis,
+        admissibility_by_search_point=(
+            _admissibility_map(
+                "dominated",
+            )
+        ),
+    )
+
+
+def _tie_plan() -> TransformationRecommendationPlan:
+    """Build one valid unresolved preference-tie recommendation."""
+    analysis = _analysis(
+        frontier=(
+            "balanced::cpu",
+            "compact::cpu",
+        ),
+        preferred=(
+            "balanced::cpu",
+            "compact::cpu",
+        ),
+    )
+
+    return build_transformation_recommendation_plan(
+        analysis=analysis,
+        admissibility_by_search_point=(
+            _admissibility_map(
+                "balanced",
+                "compact",
+            )
+        ),
+    )
+
+
+def test_plan_rejects_duplicate_pareto_ids() -> None:
+    """Pareto frontier identity must remain unique."""
+    payload = _ready_plan().model_dump(
+        mode="python"
+    )
+
+    payload[
+        "pareto_frontier_search_point_ids"
+    ] = (
+        "compact::cpu",
+        "compact::cpu",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Pareto frontier search-point IDs "
+            "must be unique"
+        ),
+    ):
+        TransformationRecommendationPlan.model_validate(
+            payload
+        )
+
+
+def test_plan_rejects_duplicate_preferred_ids() -> None:
+    """Preferred frontier identity must remain unique."""
+    payload = _ready_plan().model_dump(
+        mode="python"
+    )
+
+    payload[
+        "preferred_frontier_search_point_ids"
+    ] = (
+        "compact::cpu",
+        "compact::cpu",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Preferred frontier search-point IDs "
+            "must be unique"
+        ),
+    ):
+        TransformationRecommendationPlan.model_validate(
+            payload
+        )
+
+
+def test_preferred_candidates_must_remain_on_pareto_frontier() -> None:
+    """A recommendation preference cannot escape the Pareto frontier."""
+    payload = _ready_plan().model_dump(
+        mode="python"
+    )
+
+    payload[
+        "preferred_frontier_search_point_ids"
+    ] = (
+        "outside::cpu",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Preferred recommendation candidates "
+            "must remain inside the Pareto frontier"
+        ),
+    ):
+        TransformationRecommendationPlan.model_validate(
+            payload
+        )
+
+
+def test_tradeoffs_must_remain_on_pareto_frontier() -> None:
+    """Trade-off evidence cannot name candidates outside the frontier."""
+    payload = _ready_plan().model_dump(
+        mode="python"
+    )
+
+    payload[
+        "tradeoff_frontier_search_point_ids"
+    ] = (
+        "outside::cpu",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Trade-off candidates must remain "
+            "inside the Pareto frontier"
+        ),
+    ):
+        TransformationRecommendationPlan.model_validate(
+            payload
+        )
+
+
+@pytest.mark.parametrize(
+    (
+        "updates",
+        "message",
+    ),
+    [
+        (
+            {
+                "action": (
+                    RecommendationAction
+                    .HOLD_NO_FEASIBLE_CANDIDATE
+                ),
+            },
+            "READY recommendation requires the "
+            "apply-selected-search-point action",
+        ),
+        (
+            {
+                "required_next_gate": (
+                    RecommendationNextGate
+                    .REVISE_FEASIBILITY
+                ),
+            },
+            "READY recommendation requires "
+            "post-transformation reverification",
+        ),
+        (
+            {
+                "pareto_frontier_search_point_ids": (
+                    "compact::cpu",
+                    "balanced::cpu",
+                ),
+                "preferred_frontier_search_point_ids": (
+                    "compact::cpu",
+                    "balanced::cpu",
+                ),
+            },
+            "READY recommendation requires exactly "
+            "one preferred search point",
+        ),
+        (
+            {
+                "selected_objective_values": None,
+            },
+            "READY recommendation requires complete "
+            "selected-candidate evidence",
+        ),
+        (
+            {
+                "selected_search_point_id": (
+                    "different::cpu"
+                ),
+            },
+            "Selected search point must equal "
+            "the unique preferred search point",
+        ),
+        (
+            {
+                "reason_codes": (
+                    RecommendationReasonCode
+                    .EMPTY_PREFERRED_FRONTIER,
+                ),
+            },
+            "READY recommendation requires "
+            "unique-frontier rationale",
+        ),
+    ],
+)
+def test_ready_plan_rejects_contradictory_state(
+    updates: dict[str, object],
+    message: str,
+) -> None:
+    """READY state must remain consistent with its evidence contract."""
+    payload = _ready_plan().model_dump(
+        mode="python"
+    )
+
+    payload.update(updates)
+
+    with pytest.raises(
+        ValueError,
+        match=message,
+    ):
+        TransformationRecommendationPlan.model_validate(
+            payload
+        )
+
+
+@pytest.mark.parametrize(
+    (
+        "updates",
+        "message",
+    ),
+    [
+        (
+            {
+                "action": (
+                    RecommendationAction
+                    .APPLY_SELECTED_SEARCH_POINT
+                ),
+            },
+            "NO_FEASIBLE_CANDIDATE requires "
+            "the feasibility hold action",
+        ),
+        (
+            {
+                "required_next_gate": (
+                    RecommendationNextGate
+                    .REVERIFY_AFTER_TRANSFORMATION
+                ),
+            },
+            "NO_FEASIBLE_CANDIDATE requires "
+            "feasibility revision before progress",
+        ),
+        (
+            {
+                "pareto_frontier_search_point_ids": (
+                    "compact::cpu",
+                ),
+                "preferred_frontier_search_point_ids": (
+                    "compact::cpu",
+                ),
+            },
+            "NO_FEASIBLE_CANDIDATE requires "
+            "an empty preferred frontier",
+        ),
+        (
+            {
+                "selected_search_point_id": (
+                    "compact::cpu"
+                ),
+            },
+            "NO_FEASIBLE_CANDIDATE cannot "
+            "contain a selected candidate",
+        ),
+        (
+            {
+                "selected_verification_decision": (
+                    Decision.EXACT
+                ),
+            },
+            "NO_FEASIBLE_CANDIDATE cannot "
+            "contain a verification decision",
+        ),
+        (
+            {
+                "reason_codes": (
+                    RecommendationReasonCode
+                    .MULTIPLE_PREFERRED_FRONTIER,
+                ),
+            },
+            "Empty preferred frontier requires "
+            "explicit rationale",
+        ),
+    ],
+)
+def test_no_feasible_plan_rejects_contradictory_state(
+    updates: dict[str, object],
+    message: str,
+) -> None:
+    """No-feasible state must never smuggle in a selected candidate."""
+    payload = _empty_plan().model_dump(
+        mode="python"
+    )
+
+    payload.update(updates)
+
+    with pytest.raises(
+        ValueError,
+        match=message,
+    ):
+        TransformationRecommendationPlan.model_validate(
+            payload
+        )
+
+
+@pytest.mark.parametrize(
+    (
+        "updates",
+        "message",
+    ),
+    [
+        (
+            {
+                "action": (
+                    RecommendationAction
+                    .APPLY_SELECTED_SEARCH_POINT
+                ),
+            },
+            "UNRESOLVED_PREFERENCE_TIE requires "
+            "the preference-tie hold action",
+        ),
+        (
+            {
+                "required_next_gate": (
+                    RecommendationNextGate
+                    .REVERIFY_AFTER_TRANSFORMATION
+                ),
+            },
+            "UNRESOLVED_PREFERENCE_TIE requires "
+            "preference resolution before progress",
+        ),
+        (
+            {
+                "preferred_frontier_search_point_ids": (
+                    "compact::cpu",
+                ),
+            },
+            "UNRESOLVED_PREFERENCE_TIE requires "
+            "multiple preferred search points",
+        ),
+        (
+            {
+                "selected_search_point_id": (
+                    "compact::cpu"
+                ),
+            },
+            "Unresolved preference tie cannot "
+            "contain a selected candidate",
+        ),
+        (
+            {
+                "selected_verification_decision": (
+                    Decision.EXACT
+                ),
+            },
+            "Unresolved preference tie cannot "
+            "contain a verification decision",
+        ),
+        (
+            {
+                "reason_codes": (
+                    RecommendationReasonCode
+                    .EMPTY_PREFERRED_FRONTIER,
+                ),
+            },
+            "Preference tie requires explicit rationale",
+        ),
+    ],
+)
+def test_preference_tie_rejects_contradictory_state(
+    updates: dict[str, object],
+    message: str,
+) -> None:
+    """Unresolved ties must remain non-executing and unselected."""
+    payload = _tie_plan().model_dump(
+        mode="python"
+    )
+
+    payload.update(updates)
+
+    with pytest.raises(
+        ValueError,
+        match=message,
+    ):
+        TransformationRecommendationPlan.model_validate(
+            payload
+        )
+
+
+def test_builder_rejects_admissibility_key_identity_mismatch() -> None:
+    """Mapping keys must identify the same search point as their evidence."""
+    point = _point(
+        "compact"
+    ).model_copy(
+        update={
+            "search_point_id": "forged::cpu",
+        }
+    )
+
+    analysis = _analysis(
+        frontier=(
+            "compact::cpu",
+        ),
+        preferred=(
+            "compact::cpu",
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "admissibility key does not match "
+            "search-point identity"
+        ),
+    ):
+        build_transformation_recommendation_plan(
+            analysis=analysis,
+            admissibility_by_search_point={
+                "compact::cpu": _admissible(
+                    point
+                ),
+            },
+        )
+
+
+def test_builder_rejects_implementation_identity_mismatch() -> None:
+    """Recommendation evidence must preserve implementation identity."""
+    point = _point(
+        "compact"
+    ).model_copy(
+        update={
+            "implementation_id": "forged-v1",
+        }
+    )
+
+    analysis = _analysis(
+        frontier=(
+            "compact::cpu",
+        ),
+        preferred=(
+            "compact::cpu",
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "implementation identity does not "
+            "match M4-I evidence"
+        ),
+    ):
+        build_transformation_recommendation_plan(
+            analysis=analysis,
+            admissibility_by_search_point={
+                "compact::cpu": _admissible(
+                    point
+                ),
+            },
+        )
+
+
+def test_builder_rejects_task_family_mismatch() -> None:
+    """Recommendation evidence cannot cross task-family boundaries."""
+    point = _point(
+        "compact"
+    ).model_copy(
+        update={
+            "task_family": "other-task-family",
+        }
+    )
+
+    analysis = _analysis(
+        frontier=(
+            "compact::cpu",
+        ),
+        preferred=(
+            "compact::cpu",
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "task family does not match "
+            "M4-I evidence"
+        ),
+    ):
+        build_transformation_recommendation_plan(
+            analysis=analysis,
+            admissibility_by_search_point={
+                "compact::cpu": _admissible(
+                    point
+                ),
+            },
+        )
+
+
+def test_builder_rejects_non_admissible_search_point() -> None:
+    """Performance planning must not consume a rejected admissibility state."""
+    point = _point(
+        "compact"
+    )
+
+    not_admissible = SearchPointAdmissibility(
+        search_point=point,
+        status=(
+            AdmissibilityStatus
+            .NOT_ADMISSIBLE
+        ),
+        issues=(
+            AdmissibilityIssue(
+                code=(
+                    AdmissibilityIssueCode
+                    .VERIFICATION_REJECTED
+                ),
+                subject=point.search_point_id,
+                message="rejected for test",
+            ),
+        ),
+    )
+
+    analysis = _analysis(
+        frontier=(
+            "compact::cpu",
+        ),
+        preferred=(
+            "compact::cpu",
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "only admissible search points"
+        ),
+    ):
+        build_transformation_recommendation_plan(
+            analysis=analysis,
+            admissibility_by_search_point={
+                point.search_point_id: (
+                    not_admissible
+                ),
+            },
+        )
+
+
+def test_builder_requires_verification_evidence_when_declared() -> None:
+    """A verification-required point cannot enter recommendation bare."""
+    point = _point(
+        "compact"
+    )
+
+    forged_admissible = SearchPointAdmissibility(
+        search_point=point,
+        status=AdmissibilityStatus.ADMISSIBLE,
+    )
+
+    analysis = _analysis(
+        frontier=(
+            "compact::cpu",
+        ),
+        preferred=(
+            "compact::cpu",
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "candidate requires verification evidence"
+        ),
+    ):
+        build_transformation_recommendation_plan(
+            analysis=analysis,
+            admissibility_by_search_point={
+                point.search_point_id: (
+                    forged_admissible
+                ),
+            },
+        )
+
+
+def test_ready_plan_without_required_verification_records_no_decision() -> None:
+    """Optional verification must not invent a verification decision."""
+    point = _point(
+        "compact"
+    ).model_copy(
+        update={
+            "requires_verification": False,
+        }
+    )
+
+    admissibility = SearchPointAdmissibility(
+        search_point=point,
+        status=AdmissibilityStatus.ADMISSIBLE,
+    )
+
+    analysis = _analysis(
+        frontier=(
+            "compact::cpu",
+        ),
+        preferred=(
+            "compact::cpu",
+        ),
+    )
+
+    plan = build_transformation_recommendation_plan(
+        analysis=analysis,
+        admissibility_by_search_point={
+            point.search_point_id: admissibility,
+        },
+    )
+
+    assert plan.status is RecommendationStatus.READY
+    assert plan.selected_verification_decision is None

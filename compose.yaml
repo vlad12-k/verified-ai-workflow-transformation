@@ -65,5 +65,26 @@ services:
     restart: unless-stopped
     init: true
 
+
+  worker-preflight:
+    <<: *vait-image
+    profiles:
+      - worker-preflight
+    command:
+      - python
+      - -m
+      - vait.platform.jobs
+      - --check-config
+    environment:
+      VAIT_ENVIRONMENT: ${VAIT_ENVIRONMENT:-development}
+      VAIT_SERVICE_NAME: vait-worker-preflight
+      VAIT_WORKER_ID: ${VAIT_WORKER_ID:-vait-worker-preflight}
+      VAIT_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-vait}:${POSTGRES_PASSWORD:-vait-local-password}@postgres:5432/${POSTGRES_DB:-vait}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+    init: true
+
 volumes:
   vait-postgres-data:

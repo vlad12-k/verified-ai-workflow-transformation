@@ -3,7 +3,18 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+)
+
+from vait.platform.registry.sensitive_data import (
+    validate_evidence_payload,
+)
 
 EvidenceKind = Literal[
     "verification",
@@ -21,6 +32,7 @@ class RegistryRecord(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        hide_input_in_errors=True,
     )
 
 
@@ -85,6 +97,19 @@ class EvidenceRecord(RegistryRecord):
     kind: EvidenceKind
     payload: dict[str, JsonValue]
     created_at: AwareDatetime
+
+    @field_validator(
+        "payload",
+    )
+    @classmethod
+    def reject_prohibited_secret_material(
+        cls,
+        value: dict[str, JsonValue],
+    ) -> dict[str, JsonValue]:
+        """Reject credentials before evidence reaches persistence."""
+        return validate_evidence_payload(
+            value
+        )
 
 
 class ArtifactRecord(RegistryRecord):

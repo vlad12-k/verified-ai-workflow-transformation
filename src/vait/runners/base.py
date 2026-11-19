@@ -1,11 +1,12 @@
 """Provider-neutral execution abstractions for VAIT."""
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from vait.contracts.models import Effect, VerificationCase
 from vait.decision.models import ExecutionObservation
 
 
+@runtime_checkable
 class ImplementationRunner(Protocol):
     """Execution interface implemented by all VAIT runners."""
 

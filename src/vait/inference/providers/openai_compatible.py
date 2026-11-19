@@ -13,6 +13,9 @@ from vait.inference.providers.models import (
     ProviderTiming,
     ProviderTokenUsage,
 )
+from vait.inference.providers.transport_policy_errors import (
+    ProviderTransportPolicyDenied,
+)
 
 
 class OpenAICompatibleHttpResponse(BaseModel):
@@ -166,6 +169,14 @@ class OpenAICompatibleProvider:
                 headers=headers,
                 payload=payload,
                 timeout_seconds=self._timeout_seconds,
+            )
+        except ProviderTransportPolicyDenied:
+            return self._error_response(
+                request=request,
+                started=started,
+                error_type="transport_policy_denied",
+                message="Provider transport policy denied the request.",
+                retryable=False,
             )
         except Exception as exc:
             return self._error_response(
